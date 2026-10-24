@@ -13,7 +13,6 @@
 
 #define CLUB_MAX_PICKS 12
 #define CLUB_MAX_STATS 8
-#define CLUB_MAX_ACTIVITY 60
 
 typedef struct {
     char key[24];   /* "Rating", "Beaten", "Time to beat" */
@@ -33,18 +32,9 @@ typedef struct {
     int stat_count;
 } Club_Pick;
 
-/* One line of the recent activity feed. */
-typedef struct {
-    char text[192];  /* "Egonor has beaten Neo Turf Masters (Arcade)." */
-    char event[48];  /* "Game of the Week" */
-    char when[32];   /* "2 hours ago", as of when the page was fetched */
-} Club_Activity;
-
 typedef struct {
     Club_Pick picks[CLUB_MAX_PICKS];
     int pick_count;
-    Club_Activity activity[CLUB_MAX_ACTIVITY];
-    int activity_count;
     bool from_cache;  /* The network failed and this is the saved copy */
     long age_seconds; /* How old the page is; 0 when just fetched */
 } Club_Data;
@@ -55,9 +45,10 @@ typedef enum {
     CLUB_ERROR_PARSE,   /* Fetched, but no picks found: the page changed */
 } Club_Result;
 
-/* Fetches the page, falling back to the last saved copy when offline.
-   Blocking; call it from a worker. */
-Club_Result Club_Load(Club_Data *data);
+/* Fetches the page, falling back to the last saved copy when offline. A
+   saved copy younger than reuse_seconds is used without asking the network
+   at all (0 always fetches). Blocking; call it from a worker. */
+Club_Result Club_Load(Club_Data *data, long reuse_seconds);
 
 /* Parses page HTML into data. Exposed so the parser can be tested against a
    saved page without the network. */

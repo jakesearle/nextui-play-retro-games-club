@@ -45,11 +45,11 @@ int main(int argc, char **argv) {
         result = Club_Parse(html, len, &data);
         free(html);
     } else {
-        result = Club_Load(&data);
+        result = Club_Load(&data, 0);
     }
 
-    printf("result=%d picks=%d activity=%d from_cache=%d age=%lds\n",
-           result, data.pick_count, data.activity_count, data.from_cache, data.age_seconds);
+    printf("result=%d picks=%d from_cache=%d age=%lds\n",
+           result, data.pick_count, data.from_cache, data.age_seconds);
 
     for (int i = 0; i < data.pick_count; i++) {
         const Club_Pick *p = &data.picks[i];
@@ -59,12 +59,6 @@ int main(int argc, char **argv) {
             printf("  %-13s %s\n", p->stats[s].key, p->stats[s].value);
         }
         printf("  desc:  %s\n", p->description);
-    }
-
-    printf("\nActivity:\n");
-    for (int i = 0; i < data.activity_count; i++) {
-        const Club_Activity *a = &data.activity[i];
-        printf("  %-60s | %-20s | %s\n", a->text, a->event, a->when);
     }
 
     curl_global_cleanup();

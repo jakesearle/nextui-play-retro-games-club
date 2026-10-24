@@ -5,6 +5,8 @@
 #include "apostrophe_widgets.h"
 
 #include "club.h"
+#include "launch.h"
+#include "roms.h"
 #include "subtitle_list.h"
 #include "views.h"
 
@@ -17,6 +19,9 @@ static Club_Data g_data;
 static Club_Result g_result;
 /* Local box art per pick; empty when it could not be fetched. */
 static char g_image_paths[CLUB_MAX_PICKS][512];
+/* Set once Play has handed a game to launch.sh: every screen unwinds and
+   the app exits, so the emulator can start. */
+static bool g_launching = false;
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -90,8 +95,8 @@ static bool FitImage(const char *path, int *out_w, int *out_h) {
 /* Runs on ap_process_message's worker thread: network and files only, no
    SDL. Box art is fetched here too, so opening a pick never waits. */
 static int LoadWorker(void *userdata) {
-    (void)userdata;
-    g_result = Club_Load(&g_data);
+    long reuse_seconds = *(const long *)userdata;
+    g_result = Club_Load(&g_data, reuse_seconds);
     if (g_result != CLUB_OK) return 0;
 
     for (int i = 0; i < g_data.pick_count; i++) {
@@ -102,14 +107,15 @@ static int LoadWorker(void *userdata) {
     return 0;
 }
 
-/* Loads the page, explaining any failure. Returns whether there is data to
-   show; on failure any data from an earlier load is left in place. */
-static bool Load(void) {
+/* Loads the page, explaining any failure. A saved copy younger than
+   reuse_seconds is used as is. Returns whether there is data to show; on
+   failure any data from an earlier load is left in place. */
+static bool Load(long reuse_seconds) {
     static Club_Data previous;
     previous = g_data;
 
     ap_process_opts opts = { .message = "Checking what the club is playing..." };
-    ap_process_message(&opts, LoadWorker, NULL);
+    ap_process_message(&opts, LoadWorker, &reuse_seconds);
 
     switch (g_result) {
     case CLUB_OK:
@@ -129,6 +135,119 @@ static bool Load(void) {
 
     g_data = previous;
     return g_data.pick_count > 0;
+}
+
+/* ── Play ────────────────────────────────────────────────────────────────── */
+
+typedef struct {
+    int game_id;
+    int console_id;
+    const char *title;
+    Roms_Match match;
+    Roms_Result result;
+    float progress;
+    int cancel;
+} FindJob;
+
+/* Runs on ap_process_message's worker thread: files and network only. */
+static int FindWorker(void *userdata) {
+    FindJob *job = userdata;
+    job->result = Roms_Find(job->game_id, job->console_id, job->title, &job->match,
+                            &job->progress, &job->cancel);
+    return 0;
+}
+
+/* Finds the pick on the device and, once the player confirms the file it
+   found, hands it to launch.sh. */
+static void Play(int index) {
+    const Club_Pick *pick = &g_data.picks[index];
+    char message[512];
+
+    char label[24];
+    FindJob job = {
+        .game_id = Roms_GameIdFromUrl(pick->ra_url),
+        .console_id = Roms_ConsoleFromTitle(pick->title, label, sizeof(label)),
+        .title = pick->title,
+    };
+    if (job.game_id <= 0) {
+        InfoView("This pick has no RetroAchievements link, so there is nothing to "
+                 "match your games against.");
+        return;
+    }
+    if (job.console_id == 0) {
+        snprintf(message, sizeof(message),
+                 "This Pak does not know which console \"%s\" is yet.", label);
+        InfoView(message);
+        return;
+    }
+
+    snprintf(message, sizeof(message), "Looking for %s...", pick->title);
+    ap_process_opts opts = {
+        .message = message,
+        .show_progress = true,
+        .progress = &job.progress,
+        .interrupt_signal = &job.cancel,
+        .interrupt_button = AP_BTN_B,
+    };
+    ap_process_message(&opts, FindWorker, &job);
+
+    switch (job.result) {
+    case ROMS_FOUND:
+        break;
+    case ROMS_CANCELLED:
+        return;
+    case ROMS_NOT_FOUND:
+        snprintf(message, sizeof(message),
+                 "None of your %s games is a copy of %s that RetroAchievements "
+                 "recognizes.", label, pick->title);
+        InfoView(message);
+        return;
+    case ROMS_NO_FOLDER:
+        snprintf(message, sizeof(message), "There is no %s folder in Roms on this device.", label);
+        InfoView(message);
+        return;
+    case ROMS_NO_HASHES:
+        InfoView("Could not download RetroAchievements' list of known games. Connect "
+                 "to Wi-Fi once and it will be saved for next time.");
+        return;
+    case ROMS_UNKNOWN_CONSOLE:
+        return;
+    }
+
+    const char *file = strrchr(job.match.rom_path, '/');
+    file = file ? file + 1 : job.match.rom_path;
+    if (!job.match.emu_launch[0]) {
+        snprintf(message, sizeof(message),
+                 "Found %s, but no emulator for it is installed.", file);
+        InfoView(message);
+        return;
+    }
+
+    snprintf(message, sizeof(message), "Play %s?", file);
+    ap_footer_item footer[] = {
+        { .button = AP_BTN_B, .label = "Cancel" },
+        { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
+    };
+    ap_message_opts confirm = {
+        .message = message,
+        .footer = footer, .footer_count = sizeof(footer) / sizeof(footer[0]),
+    };
+    ap_confirm_result answer;
+    ap_confirmation(&confirm, &answer);
+    if (!answer.confirmed) return;
+
+    /* Best effort: without it the app just reopens at the top. */
+    FILE *selection = fopen(LAUNCH_SELECTION_FILE, "w");
+    if (selection) {
+        fputs(pick->title, selection);
+        fclose(selection);
+    }
+
+    if (!Launch_HandOff(&job.match)) {
+        InfoView("Could not hand the game over to the launcher.");
+        return;
+    }
+    g_launching = true;
 }
 
 /* ── Views ───────────────────────────────────────────────────────────────── */
@@ -179,6 +298,7 @@ static void PickView(int index) {
 
     ap_footer_item footer[] = {
         { .button = AP_BTN_B, .label = "Back" },
+        { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
     };
 
     ap_detail_opts opts = {
@@ -190,60 +310,40 @@ static void PickView(int index) {
         .show_section_separator = true,
     };
 
-    /* The widget always reports A; there is nothing to select here, so
-       reopen rather than leaving on it. */
-    for (;;) {
+    /* A plays; coming back from a search that found nothing reopens the
+       screen, which the widget cannot do without starting at the top. */
+    while (!g_launching) {
         ap_detail_result result;
         ap_detail_screen(&opts, &result);
         if (result.action != AP_DETAIL_ACTION) break;
+        Play(index);
     }
 }
 
-static void ActivityView(void) {
-    if (g_data.activity_count == 0) {
-        InfoView("No recent activity.");
-        return;
+/* The pick launch.sh last played, so coming back from a game lands on it.
+   Read once: the file is removed so a later, ordinary start is unaffected. */
+static int ReturningCursor(void) {
+    char title[sizeof(g_data.picks[0].title)] = "";
+    FILE *f = fopen(LAUNCH_SELECTION_FILE, "r");
+    if (!f) return 0;
+    if (!fgets(title, sizeof(title), f)) title[0] = '\0';
+    fclose(f);
+    remove(LAUNCH_SELECTION_FILE);
+
+    for (int i = 0; i < g_data.pick_count; i++) {
+        if (strcmp(g_data.picks[i].title, title) == 0) return i;
     }
-
-    ap_list_item items[CLUB_MAX_ACTIVITY];
-    for (int i = 0; i < g_data.activity_count; i++) {
-        items[i] = (ap_list_item){
-            .label = g_data.activity[i].text,
-            .trailing_text = g_data.activity[i].when,
-        };
-    }
-
-    char title[SCREEN_TITLE_MAX];
-    FormatTitle("Recent Activity", title, sizeof(title));
-
-    ap_footer_item footer[] = {
-        { .button = AP_BTN_B, .label = "Back" },
-        { .button = AP_BTN_A, .label = "Details", .is_confirm = true },
-    };
-
-    ap_list_opts opts = ap_list_default_opts(title, items, g_data.activity_count);
-    opts.footer = footer;
-    opts.footer_count = sizeof(footer) / sizeof(footer[0]);
-
-    for (;;) {
-        ap_list_result result;
-        if (ap_list(&opts, &result) != AP_OK) break;
-        opts.initial_index = result.selected_index;
-        opts.visible_start_index = result.visible_start_index;
-
-        /* Long lines are cut off in the list; show the whole entry. */
-        const Club_Activity *a = &g_data.activity[result.selected_index];
-        char message[sizeof(a->text) + sizeof(a->event) + sizeof(a->when) + 8];
-        snprintf(message, sizeof(message), "%s\n\n%s, %s", a->text, a->event, a->when);
-        InfoView(message);
-    }
+    return 0;
 }
 
-void MainView(void) {
-    if (!Load()) return;
+void MainView(bool returning) {
+    /* Coming back from a game, the page fetched just before it is still
+       good, so the list reappears without a network round trip. */
+    if (!Load(returning ? 15L * 60 : 0)) return;
+    int cursor = returning ? ReturningCursor() : 0, scroll = 0;
 
     for (;;) {
-        /* Rebuilt each pass, since Y can replace the data underneath. */
+        /* Rebuilt each pass, since Refresh can replace the data underneath. */
         SubtitleListItem items[CLUB_MAX_PICKS + 1];
         int count = 0;
 
@@ -253,10 +353,10 @@ void MainView(void) {
                 .subtitle = g_data.picks[i].event,
             };
         }
-        int activity_index = count;
+        int refresh_index = count;
         items[count++] = (SubtitleListItem){
-            .label = "Recent Activity",
-            .subtitle = "Who has beaten what lately",
+            .label = "Refresh",
+            .subtitle = "Check the club page for new picks",
         };
 
         char title[SCREEN_TITLE_MAX];
@@ -264,18 +364,18 @@ void MainView(void) {
 
         ap_footer_item footer[] = {
             { .button = AP_BTN_B, .label = "Quit" },
-            { .button = AP_BTN_Y, .label = "Refresh" },
+            { .button = AP_BTN_X, .label = "Play" },
             { .button = AP_BTN_A, .label = "Details", .is_confirm = true },
         };
 
-        static int cursor = 0, scroll = 0;
         SubtitleListOpts opts = {
             .title = title,
             .items = items,
             .item_count = count,
             .footer = footer,
             .footer_count = sizeof(footer) / sizeof(footer[0]),
-            .secondary_action_button = AP_BTN_Y,
+            .secondary_action_button = AP_BTN_NONE,
+            .tertiary_action_button = AP_BTN_X,
             .initial_index = cursor < count ? cursor : 0,
             .visible_start_index = scroll,
         };
@@ -285,11 +385,13 @@ void MainView(void) {
         cursor = result.selected_index;
         scroll = result.visible_start_index;
 
-        if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
-            Load();
+        bool on_pick = result.selected_index != refresh_index;
+        if (result.action == AP_ACTION_TERTIARY_TRIGGERED) {
+            if (on_pick) Play(result.selected_index);
         } else if (result.action == AP_ACTION_SELECTED) {
-            if (result.selected_index == activity_index) ActivityView();
-            else if (result.selected_index >= 0) PickView(result.selected_index);
+            if (on_pick) PickView(result.selected_index);
+            else Load(0);
         }
+        if (g_launching) break;
     }
 }

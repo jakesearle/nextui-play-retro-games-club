@@ -1,0 +1,11 @@
+[wrap-git]
+url = https://github.com/RetroAchievements/rcheevos.git
+# v12.2.1: the commit NextUI pins for minarch, so our hashes are the ones
+# its emulator computes when it identifies a game.
+revision = 40d916de00fe757bab40fb4db41a7912193a48e3
+depth = 1
+
+patch_directory = rcheevos
+
+[provide]
+rcheevos_hash = rcheevos_hash_dep

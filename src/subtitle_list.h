@@ -20,14 +20,16 @@ typedef struct {
     ap_footer_item   *footer;
     int               footer_count;
     ap_button         secondary_action_button; /* AP_BTN_NONE = unused */
+    ap_button         tertiary_action_button;  /* AP_BTN_NONE = unused */
     int               initial_index;
     int               visible_start_index;
 } SubtitleListOpts;
 
-/* Blocks until A, B or the secondary button. Returns AP_OK with
-   result->action AP_ACTION_SELECTED or AP_ACTION_SECONDARY_TRIGGERED, or
-   AP_CANCELLED on B. selected_index and visible_start_index are filled in
-   either way, for restoring the position on the next call. */
+/* Blocks until A, B or an action button. Returns AP_OK with result->action
+   AP_ACTION_SELECTED, AP_ACTION_SECONDARY_TRIGGERED or
+   AP_ACTION_TERTIARY_TRIGGERED, or AP_CANCELLED on B. selected_index and
+   visible_start_index are filled in either way, for restoring the position
+   on the next call. */
 int SubtitleList(const SubtitleListOpts *opts, ap_list_result *result);
 
 /* Apostrophe's device-scaled layout units, which only the translation unit

@@ -82,6 +82,10 @@ int SubtitleList(const SubtitleListOpts *opts, ap_list_result *result) {
                        ev.button == opts->secondary_action_button) {
                 result->action = AP_ACTION_SECONDARY_TRIGGERED;
                 running = false;
+            } else if (opts->tertiary_action_button != AP_BTN_NONE &&
+                       ev.button == opts->tertiary_action_button) {
+                result->action = AP_ACTION_TERTIARY_TRIGGERED;
+                running = false;
             }
         }
         if (!running) break;

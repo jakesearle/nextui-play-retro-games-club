@@ -51,6 +51,12 @@ tasks:
     cmds:
       - ./{{.NATIVE_BUILD_DIR}}/scrape {{.FILE}}
 
+  findrom:
+    desc: Look for the current picks under $ROMS_PATH (ARGS="--hash <console> <file>" hashes one file)
+    deps: [build]
+    cmds:
+      - ./{{.NATIVE_BUILD_DIR}}/findrom {{.ARGS}}
+
   device:
     desc: Cross-compile the one binary every handheld runs
     deps: [_image]

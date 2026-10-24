@@ -1,0 +1,99 @@
+#define IO_USER_AGENT "nextui-prgc-tracker/1.0.0"
+#define IO_CONNECT_TIMEOUT_SECONDS 5L
+#define IO_TIMEOUT_SECONDS 30L
+/* The largest thing fetched is a console's hash library (~1 MB for the
+   biggest); anything far beyond that is not what was asked for. */
+#define IO_MAX_BYTES (16L * 1024 * 1024)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <curl/curl.h>
+
+#include "io.h"
+
+static size_t Append(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    size_t chunk = size * nmemb;
+    Io_Buffer *buffer = (Io_Buffer *)userdata;
+    if (buffer->size + chunk > (size_t)IO_MAX_BYTES) return 0;
+
+    char *grown = realloc(buffer->data, buffer->size + chunk + 1);
+    if (!grown) return 0;
+
+    buffer->data = grown;
+    memcpy(buffer->data + buffer->size, ptr, chunk);
+    buffer->size += chunk;
+    buffer->data[buffer->size] = '\0';
+    return chunk;
+}
+
+bool Io_HttpGet(const char *url, Io_Buffer *buffer) {
+    CURL *curl = curl_easy_init();
+    if (!curl) return false;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, IO_USER_AGENT);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, IO_CONNECT_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, IO_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Append);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
+
+    /* curl is statically linked against our own OpenSSL on device, which
+       knows no system trust store; launch.sh points this at cacert.pem. */
+    const char *ca_bundle = getenv("SSL_CERT_FILE");
+    if (ca_bundle && ca_bundle[0]) curl_easy_setopt(curl, CURLOPT_CAINFO, ca_bundle);
+
+    CURLcode code = curl_easy_perform(curl);
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_cleanup(curl);
+
+    if (code != CURLE_OK) fprintf(stderr, "GET %s: %s\n", url, curl_easy_strerror(code));
+    else if (status != 200) fprintf(stderr, "GET %s: HTTP %ld\n", url, status);
+    return code == CURLE_OK && status == 200;
+}
+
+bool Io_WriteFileAtomic(const char *path, const char *data, size_t len) {
+    char tmp[512];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return false;
+
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return false;
+    bool ok = fwrite(data, 1, len, f) == len;
+    ok = fclose(f) == 0 && ok;
+    if (ok) ok = rename(tmp, path) == 0;
+    if (!ok) remove(tmp);
+    return ok;
+}
+
+char *Io_ReadFile(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+
+    Io_Buffer buffer = { 0 };
+    char chunk[16384];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+        if (Append(chunk, 1, n, &buffer) != n) {
+            free(buffer.data);
+            fclose(f);
+            return NULL;
+        }
+    }
+    fclose(f);
+
+    /* An empty file still reads as an empty string, not a failure. */
+    if (!buffer.data) buffer.data = calloc(1, 1);
+    if (buffer.data) *out_len = buffer.size;
+    return buffer.data;
+}
+
+long Io_FileAge(const char *path) {
+    struct stat info;
+    if (stat(path, &info) != 0) return -1;
+    return (long)(time(NULL) - info.st_mtime);
+}
