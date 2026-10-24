@@ -4,6 +4,8 @@ revision = v1.2.0
 depth = 1
 
 patch_directory = apostrophe
+# Desktop-only drawing fix; the device draws corners from NextUI's sprites.
+diff_files = apostrophe-flush-rounded-corners.patch
 
 [provide]
 apostrophe = apostrophe_dep

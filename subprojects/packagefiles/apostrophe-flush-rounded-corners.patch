@@ -1,0 +1,94 @@
+--- a/include/apostrophe.h
++++ b/include/apostrophe.h
+@@ -2486,56 +2486,35 @@
+     }
+ }
+ 
+-/* Fill a quarter-circle arc with anti-aliased edges */
++/* Fills one r x r corner of a rounded rectangle, anti-aliased. (cx, cy) is
++   the grid point the circle is centred on, which is also the corner box's
++   inner corner; every pixel drawn stays inside that box, so the arcs meet
++   the straight edges flush. Each row is sampled at its centre. */
+ static void ap__fill_circle_quadrant(int cx, int cy, int r, int quadrant) {
+     SDL_Renderer *rend = ap__g.renderer;
+     Uint8 base_r, base_g, base_b, base_a;
+     SDL_GetRenderDrawColor(rend, &base_r, &base_g, &base_b, &base_a);
+ 
+-    for (int dy = 0; dy <= r; dy++) {
+-        float fx = sqrtf((float)(r * r - dy * dy));
++    bool left = quadrant == 0 || quadrant == 2;
++    bool top  = quadrant == 0 || quadrant == 1;
++
++    for (int j = 0; j < r; j++) {
++        float d  = (float)r - (float)j - 0.5f; /* row centre to circle centre */
++        float fx = sqrtf((float)(r * r) - d * d);
+         int ix = (int)fx;            /* integer part = fully filled pixels */
++        if (ix > r) ix = r;
+         float frac = fx - (float)ix; /* fractional part = edge pixel alpha */
+         Uint8 edge_a = (Uint8)(frac * base_a);
+-        int y0;
++        int y0 = top ? cy - r + j : cy + r - 1 - j;
+ 
+-        switch (quadrant) {
+-            case 0: /* top-left */
+-                y0 = cy - dy;
+-                SDL_RenderDrawLine(rend, cx - ix, y0, cx, y0);
+-                if (edge_a > 0) {
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, edge_a);
+-                    SDL_RenderDrawPoint(rend, cx - ix - 1, y0);
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, base_a);
+-                }
+-                break;
+-            case 1: /* top-right */
+-                y0 = cy - dy;
+-                SDL_RenderDrawLine(rend, cx, y0, cx + ix, y0);
+-                if (edge_a > 0) {
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, edge_a);
+-                    SDL_RenderDrawPoint(rend, cx + ix + 1, y0);
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, base_a);
+-                }
+-                break;
+-            case 2: /* bottom-left */
+-                y0 = cy + dy;
+-                SDL_RenderDrawLine(rend, cx - ix, y0, cx, y0);
+-                if (edge_a > 0) {
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, edge_a);
+-                    SDL_RenderDrawPoint(rend, cx - ix - 1, y0);
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, base_a);
+-                }
+-                break;
+-            case 3: /* bottom-right */
+-                y0 = cy + dy;
+-                SDL_RenderDrawLine(rend, cx, y0, cx + ix, y0);
+-                if (edge_a > 0) {
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, edge_a);
+-                    SDL_RenderDrawPoint(rend, cx + ix + 1, y0);
+-                    SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, base_a);
+-                }
+-                break;
++        if (ix > 0) {
++            if (left) SDL_RenderDrawLine(rend, cx - ix, y0, cx - 1, y0);
++            else      SDL_RenderDrawLine(rend, cx, y0, cx + ix - 1, y0);
++        }
++        if (edge_a > 0 && ix < r) {
++            SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, edge_a);
++            SDL_RenderDrawPoint(rend, left ? cx - ix - 1 : cx + ix, y0);
++            SDL_SetRenderDrawColor(rend, base_r, base_g, base_b, base_a);
+         }
+     }
+ }
+@@ -2601,10 +2580,10 @@
+     SDL_RenderFillRect(rend, &bot);
+ 
+     /* Four corner arcs */
+-    ap__fill_circle_quadrant(x + r - 1,     y + r - 1,     r, 0);
+-    ap__fill_circle_quadrant(x + w - r,     y + r - 1,     r, 1);
+-    ap__fill_circle_quadrant(x + r - 1,     y + h - r,     r, 2);
+-    ap__fill_circle_quadrant(x + w - r,     y + h - r,     r, 3);
++    ap__fill_circle_quadrant(x + r,     y + r,     r, 0);
++    ap__fill_circle_quadrant(x + w - r, y + r,     r, 1);
++    ap__fill_circle_quadrant(x + r,     y + h - r, r, 2);
++    ap__fill_circle_quadrant(x + w - r, y + h - r, r, 3);
+ }
+ 
+ void ap_draw_pill(int x, int y, int w, int h, ap_color c) {
