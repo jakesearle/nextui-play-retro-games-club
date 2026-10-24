@@ -1,0 +1,11 @@
+# Meson build directories
+build/
+# Meson subprojects: ignore fetched sources, keep wrap files and our overlays
+subprojects/*
+!subprojects/*.wrap
+!subprojects/packagefiles/
+!subprojects/packagefiles/**
+
+.vscode/
+.task/
+dist/

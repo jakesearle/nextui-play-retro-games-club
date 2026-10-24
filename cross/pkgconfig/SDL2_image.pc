@@ -1,0 +1,12 @@
+# Missing from the toolchain sysroot; paths mirror its sdl2.pc.
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: SDL2_image
+Description: Image loading for SDL2
+Version: 2.0.5
+Requires: sdl2
+Libs: -L${libdir} -lSDL2_image
+Cflags: -I${includedir}/SDL2

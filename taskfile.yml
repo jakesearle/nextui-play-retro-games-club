@@ -1,0 +1,141 @@
+version: '3'
+
+# Native builds use the system SDL2 and curl. The device build cross-compiles
+# one aarch64 binary for every NextUI handheld, statically linking curl and
+# OpenSSL because the sysroot has neither libcurl nor a current OpenSSL.
+#
+# Apostrophe resolves the platform at runtime, so the same binary runs on
+# tg5040, tg5050, my355 and h700. PLATFORM survives only in `task adb`, which
+# has to know which Tools directory on the SD card to push to.
+#
+# Typical device round-trip:  task adb PLATFORM=tg5040
+
+vars:
+  NATIVE_BUILD_DIR: build/native
+  DEVICE_BUILD_DIR: build/device
+  BIN: prgc-tracker
+  PAK_NAME: PRGC Tracker.pak
+  PAK_DIR: 'dist/{{.PAK_NAME}}'
+  ZIP_NAME: PRGC.Tracker.pak.zip
+  IMAGE: prgc-tracker-toolchain
+  CACERT: build/cacert.pem
+  CACERT_URL: https://curl.se/ca/cacert.pem
+  # Ours first: it overrides the sysroot's sdl2.pc to drop its rpath, and
+  # supplies the SDL2_ttf/SDL2_image files the sysroot lacks entirely.
+  DEVICE_PKG_CONFIG_PATH: >-
+    /workspace/cross/pkgconfig:/opt/aarch64-nextui-linux-gnu/aarch64-nextui-linux-gnu/libc/usr/lib/pkgconfig
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds: [task --list]
+
+  build:
+    desc: Build natively for this machine
+    cmds:
+      - '[ -f {{.NATIVE_BUILD_DIR}}/build.ninja ] || meson setup {{.NATIVE_BUILD_DIR}}'
+      - meson compile -C {{.NATIVE_BUILD_DIR}}
+
+  run:
+    desc: Build and run natively
+    deps: [build]
+    cmds:
+      # Apostrophe loads font.ttf from the working directory on desktop.
+      - cp -n subprojects/apostrophe/res/font.ttf {{.NATIVE_BUILD_DIR}}/ 2>/dev/null || true
+      - cd {{.NATIVE_BUILD_DIR}} && ./{{.BIN}}
+
+  scrape:
+    desc: Run the scraper without the UI (FILE=page.html parses a saved page)
+    deps: [build]
+    cmds:
+      - ./{{.NATIVE_BUILD_DIR}}/scrape {{.FILE}}
+
+  device:
+    desc: Cross-compile the one binary every handheld runs
+    deps: [_image]
+    cmds:
+      - task: _docker
+        vars:
+          CMD: >-
+            sh -c '[ -f {{.DEVICE_BUILD_DIR}}/build.ninja ] ||
+            meson setup {{.DEVICE_BUILD_DIR}}
+            --cross-file cross/nextui.ini
+            --buildtype release --default-library=static
+            --force-fallback-for=openssl'
+      - task: _docker
+        vars: {CMD: 'meson compile -C {{.DEVICE_BUILD_DIR}} {{.BIN}}'}
+
+  pak:
+    desc: Assemble the Pak in dist/
+    deps: [device, _cacert]
+    cmds:
+      - rm -rf "{{.PAK_DIR}}"
+      - mkdir -p "{{.PAK_DIR}}"
+      - cp pak/launch.sh pak/THIRD-PARTY-NOTICES.txt LICENSE.txt "{{.PAK_DIR}}/"
+      - cp {{.CACERT}} "{{.PAK_DIR}}/cacert.pem"
+      - chmod +x "{{.PAK_DIR}}/launch.sh"
+      - cp {{.DEVICE_BUILD_DIR}}/{{.BIN}} "{{.PAK_DIR}}/{{.BIN}}"
+      # Strip only the shipped copy, so the build tree keeps its debug info.
+      - task: _docker
+        vars:
+          CMD: 'aarch64-nextui-linux-gnu-strip "{{.PAK_DIR}}/{{.BIN}}"'
+      - 'echo "→ {{.PAK_DIR}}"'
+
+  package:
+    desc: Zip the Pak into the single archive published for every platform
+    deps: [pak]
+    cmds:
+      # The Pak's contents sit at the root of the archive, not the .pak folder:
+      # NextUI creates the directory itself, under the platform it is running.
+      - rm -f "dist/{{.ZIP_NAME}}"
+      - root=$PWD; cd "{{.PAK_DIR}}" && zip -qr9 "$root/dist/{{.ZIP_NAME}}" . -x '.*'
+      - unzip -Z1 "dist/{{.ZIP_NAME}}" | grep -qx "{{.BIN}}"
+      - 'echo "→ dist/{{.ZIP_NAME}}"'
+
+  adb:
+    desc: Push the Pak to a connected device over adb (PLATFORM picks the folder)
+    deps: [pak]
+    vars:
+      PLATFORM: '{{.PLATFORM | default "tg5040"}}'
+      TOOLS: /mnt/SDCARD/Tools/{{.PLATFORM}}
+    cmds:
+      # The remote paths contain a space, so they are quoted for the device
+      # shell as well as for this one.
+      - adb shell "mkdir -p '{{.TOOLS}}'"
+      - adb push "{{.PAK_DIR}}" "{{.TOOLS}}/"
+      - adb shell "chmod +x '{{.TOOLS}}/{{.PAK_NAME}}/launch.sh' '{{.TOOLS}}/{{.PAK_NAME}}/{{.BIN}}'"
+
+  clean:
+    desc: Remove all build output
+    cmds:
+      - rm -rf build dist
+
+  # ── Internal ──────────────────────────────────────────────────────────────
+
+  _cacert:
+    internal: true
+    status:
+      - test -s {{.CACERT}}
+    cmds:
+      - mkdir -p $(dirname {{.CACERT}})
+      # --fail so an error page is not saved as a certificate bundle, and a
+      # sanity check on the result for the same reason.
+      - curl -fsS -o {{.CACERT}} {{.CACERT_URL}}
+      - grep -q "BEGIN CERTIFICATE" {{.CACERT}}
+      - 'echo "cacert.pem: $(grep -c ''BEGIN CERTIFICATE'' {{.CACERT}}) certificates"'
+
+  _image:
+    internal: true
+    # Remove the image to pick up Dockerfile changes.
+    status:
+      - docker image inspect {{.IMAGE}} >/dev/null 2>&1
+    cmds:
+      - docker build -q -t {{.IMAGE}} docker
+
+  _docker:
+    internal: true
+    cmds:
+      - docker run --rm -v "$PWD:/workspace" -w /workspace
+        -e PKG_CONFIG_PATH={{.DEVICE_PKG_CONFIG_PATH}}
+        {{.IMAGE}} {{.CMD}}
