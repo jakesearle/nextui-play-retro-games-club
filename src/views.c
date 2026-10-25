@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -90,6 +91,55 @@ static bool FitImage(const char *path, int *out_w, int *out_h) {
     return *out_w > 0 && *out_h > 0;
 }
 
+/* "Game of the Week October 25 - 31, 2026" becomes "Game of the Week |
+   October 25-31, 2026", and "Game of the Season Q4 2026 (Oct 1 - Dec 31)"
+   becomes "Game of the Season | Q4 2026": the event's name, then when it
+   runs. The split is the first word that starts a date (a month, a number
+   or a quarter); an event with none is left as it is. */
+static void FormatEvent(const char *event, char *out, size_t out_size) {
+    static const char *const months[] = {
+        "January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December",
+    };
+
+    const char *period = NULL;
+    for (const char *w = event; *w;) {
+        while (*w == ' ') w++;
+        size_t len = strcspn(w, " ");
+        if (len == 0) break;
+        bool starts_date = isdigit((unsigned char)w[0]) ||
+                           (len == 2 && w[0] == 'Q' && w[1] >= '1' && w[1] <= '4');
+        for (size_t m = 0; !starts_date && m < sizeof(months) / sizeof(months[0]); m++) {
+            starts_date = strlen(months[m]) == len && strncmp(w, months[m], len) == 0;
+        }
+        if (starts_date && w != event) { period = w; break; }
+        w += len;
+    }
+    if (!period) {
+        snprintf(out, out_size, "%s", event);
+        return;
+    }
+
+    /* The quarter's date range repeats what "Q4" already says. */
+    char when[96];
+    snprintf(when, sizeof(when), "%s", period);
+    char *paren = strstr(when, " (");
+    if (paren) *paren = '\0';
+
+    /* "25 - 31" reads as two things; "25-31" as one range. */
+    for (char *p = when; (p = strstr(p, " - ")) != NULL;) {
+        if (p > when && isdigit((unsigned char)p[-1]) && isdigit((unsigned char)p[3])) {
+            p[0] = '-';
+            memmove(p + 1, p + 3, strlen(p + 3) + 1);
+        }
+        p++;
+    }
+
+    int name_len = (int)(period - event);
+    while (name_len > 0 && event[name_len - 1] == ' ') name_len--;
+    snprintf(out, out_size, "%.*s | %s", name_len, event, when);
+}
+
 /* ── Loading ─────────────────────────────────────────────────────────────── */
 
 /* Runs on ap_process_message's worker thread: network and files only, no
@@ -114,7 +164,8 @@ static bool Load(long reuse_seconds) {
     static Club_Data previous;
     previous = g_data;
 
-    ap_process_opts opts = { .message = "Checking what the club is playing..." };
+    /* Three periods, not U+2026: NextUI's font draws that glyph raised. */
+    ap_process_opts opts = { .message = "Loading..." };
     ap_process_message(&opts, LoadWorker, &reuse_seconds);
 
     switch (g_result) {
@@ -249,12 +300,56 @@ static void Play(int index, bool resume) {
 static void PickView(int index) {
     const Club_Pick *pick = &g_data.picks[index];
 
-    ap_detail_info_pair info[2 + CLUB_MAX_STATS];
+    /* The event and what comes next read as plain lines; only the stats
+       are label and value. */
+    char event[128], when[sizeof(event) + sizeof(pick->next) + 2];
+    FormatEvent(pick->event, event, sizeof(event));
+    snprintf(when, sizeof(when), "%s%s%s", event, pick->next[0] ? "\n" : "", pick->next);
+
+    /* The page's award counts, in plainer words. RetroAchievements'
+       "completed" is every achievement in softcore and "mastered" every
+       one in hardcore, so the softcore 100% is listed first. */
+    static const struct { const char *key; const char *label; } awards[] = {
+        { "Beaten", "Beaten" },
+        { "Completed", "100%'d" },
+        { "Mastered", "100%'d (Hardcore)" },
+    };
+    static char award_values[CLUB_MAX_STATS][32];
+    ap_detail_info_pair info[CLUB_MAX_STATS];
     int info_count = 0;
-    info[info_count++] = (ap_detail_info_pair){ "Event", pick->event };
-    if (pick->next[0]) info[info_count++] = (ap_detail_info_pair){ "Next", pick->next };
+
+    /* Everything but the awards keeps the page's order; the awards go
+       where the first of them was, in the order above. */
+    int award_at = -1;
     for (int i = 0; i < pick->stat_count; i++) {
-        info[info_count++] = (ap_detail_info_pair){ pick->stats[i].key, pick->stats[i].value };
+        bool is_award = false;
+        for (size_t a = 0; a < sizeof(awards) / sizeof(awards[0]); a++) {
+            is_award = is_award || strcmp(pick->stats[i].key, awards[a].key) == 0;
+        }
+        if (!is_award) {
+            info[info_count++] = (ap_detail_info_pair){ pick->stats[i].key, pick->stats[i].value };
+        } else if (award_at < 0) {
+            award_at = info_count;
+        }
+    }
+    if (award_at >= 0) {
+        ap_detail_info_pair rows[sizeof(awards) / sizeof(awards[0])];
+        int row_count = 0;
+        for (size_t a = 0; a < sizeof(awards) / sizeof(awards[0]); a++) {
+            for (int i = 0; i < pick->stat_count; i++) {
+                if (strcmp(pick->stats[i].key, awards[a].key) != 0) continue;
+                const char *count = pick->stats[i].value;
+                snprintf(award_values[row_count], sizeof(award_values[row_count]), "%s %s",
+                         count, strcmp(count, "1") == 0 ? "member" : "members");
+                rows[row_count] = (ap_detail_info_pair){ awards[a].label, award_values[row_count] };
+                row_count++;
+                break;
+            }
+        }
+        memmove(&info[award_at + row_count], &info[award_at],
+                (size_t)(info_count - award_at) * sizeof(info[0]));
+        memcpy(&info[award_at], rows, (size_t)row_count * sizeof(rows[0]));
+        info_count += row_count;
     }
 
     /* The device cannot open a browser, but the addresses are still useful
@@ -264,7 +359,7 @@ static void PickView(int index) {
     if (pick->ra_url[0]) links[link_count++] = (ap_detail_info_pair){ "RetroAchievements", pick->ra_url };
     if (pick->guide_url[0]) links[link_count++] = (ap_detail_info_pair){ "Guide", pick->guide_url };
 
-    ap_detail_section sections[4];
+    ap_detail_section sections[5];
     int section_count = 0;
 
     int image_w, image_h;
@@ -274,8 +369,11 @@ static void PickView(int index) {
             .image_w = image_w, .image_h = image_h };
     }
     sections[section_count++] = (ap_detail_section){
-        .type = AP_SECTION_INFO, .title = "This Round",
-        .info_pairs = info, .info_count = info_count };
+        .type = AP_SECTION_DESCRIPTION, .description = when };
+    if (info_count > 0) {
+        sections[section_count++] = (ap_detail_section){
+            .type = AP_SECTION_INFO, .info_pairs = info, .info_count = info_count };
+    }
     if (pick->description[0]) {
         sections[section_count++] = (ap_detail_section){
             .type = AP_SECTION_DESCRIPTION, .title = "About",
@@ -343,19 +441,18 @@ void MainView(bool returning) {
     for (;;) {
         /* Rebuilt each pass, since Refresh can replace the data underneath. */
         SubtitleListItem items[CLUB_MAX_PICKS + 1];
+        static char events[CLUB_MAX_PICKS][128];
         int count = 0;
 
         for (int i = 0; i < g_data.pick_count; i++) {
+            FormatEvent(g_data.picks[i].event, events[i], sizeof(events[i]));
             items[count++] = (SubtitleListItem){
                 .label = g_data.picks[i].title,
-                .subtitle = g_data.picks[i].event,
+                .subtitle = events[i],
             };
         }
         int refresh_index = count;
-        items[count++] = (SubtitleListItem){
-            .label = "Refresh",
-            .subtitle = "Check the club page for new picks",
-        };
+        items[count++] = (SubtitleListItem){ .label = "Refresh" };
 
         char title[SCREEN_TITLE_MAX];
         FormatTitle(SCREEN_TITLE, title, sizeof(title));
