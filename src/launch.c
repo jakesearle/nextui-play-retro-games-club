@@ -65,9 +65,36 @@ bool Launch_AddRecent(const char *rom_path) {
     return ok;
 }
 
-bool Launch_HandOff(const Roms_Match *match) {
+bool Launch_FindResume(const char *rom_path, Launch_Resume *resume) {
+    memset(resume, 0, sizeof(*resume));
+    const char *shared = getenv("SHARED_USERDATA_PATH");
+    char tag[32];
+    if (!shared || !shared[0] || !Roms_TagForPath(rom_path, tag, sizeof(tag))) return false;
+
+    const char *file = strrchr(rom_path, '/');
+    file = file ? file + 1 : rom_path;
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.minui/%s/%s.txt", shared, tag, file);
+    size_t len = 0;
+    char *text = Io_ReadFile(path, &len);
+    if (!text) return false;
+    char *end;
+    long slot = strtol(text, &end, 10);
+    bool ok = end != text && slot >= 0 && slot < LAUNCH_FRESH_SLOT;
+    free(text);
+    if (!ok) return false;
+
+    resume->slot = (int)slot;
+    snprintf(path, sizeof(path), "%s/.minui/%s/%s.%d.bmp", shared, tag, file, resume->slot);
+    if (Io_FileAge(path) >= 0) snprintf(resume->preview, sizeof(resume->preview), "%s", path);
+    return true;
+}
+
+bool Launch_HandOff(const Roms_Match *match, int resume_slot) {
     char text[1100];
-    int n = snprintf(text, sizeof(text), "%s\n%s\n", match->emu_launch, match->rom_path);
+    int n = snprintf(text, sizeof(text), "%s\n%s\n%d\n", match->emu_launch, match->rom_path,
+                     resume_slot);
     if (n <= 0 || (size_t)n >= sizeof(text)) return false;
     if (!Io_WriteFileAtomic(LAUNCH_FILE, text, (size_t)n)) return false;
 

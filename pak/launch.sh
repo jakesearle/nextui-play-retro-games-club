@@ -38,11 +38,13 @@ set_governor() {
 play() {
     EMU_LAUNCH=$1
     ROM=$2
-    echo "launch: $EMU_LAUNCH $ROM"
+    SLOT=$3
+    echo "launch: $EMU_LAUNCH $ROM (slot $SLOT)"
 
-    # Slot 8 is the hidden state minarch saves on quit, so the game picks up
-    # where it was last left, exactly as it would from NextUI's menu.
-    echo 8 >/tmp/resume_slot.txt
+    # minarch loads this state slot on start. The app picks the last save
+    # slot to resume, or 8 to start fresh, which is what NextUI's menu asks
+    # for on a plain launch (a default-state slot that normally is empty).
+    echo "$SLOT" >/tmp/resume_slot.txt
 
     if command -v gametimectl.elf >/dev/null 2>&1; then
         gametimectl.elf start "$ROM" || true
@@ -64,8 +66,8 @@ play() {
     unset HOOK_CMD HOOK_EMU_PATH HOOK_TYPE HOOK_ROM_PATH HOOK_LAST
 }
 
-# Choosing Play leaves the emulator pak's launch.sh and the ROM here, one per
-# line, and exits. NextUI's own hand-off, /tmp/next, is deleted as soon as
+# Choosing Play leaves the emulator pak's launch.sh, the ROM and the state
+# slot to load here, one per line, and exits. NextUI's own hand-off, /tmp/next, is deleted as soon as
 # this script returns, so the game is started from here instead, and when it
 # closes the app opens again (with --returning) rather than dropping back to
 # NextUI. Quitting the app without choosing Play ends the loop.
@@ -79,14 +81,19 @@ while :; do
     [ -f "$LAUNCH_FILE" ] || break
     EMU_LAUNCH=
     ROM=
-    { IFS= read -r EMU_LAUNCH || true; IFS= read -r ROM || true; } <"$LAUNCH_FILE"
+    SLOT=
+    { IFS= read -r EMU_LAUNCH || true; IFS= read -r ROM || true; IFS= read -r SLOT || true; } <"$LAUNCH_FILE"
     rm -f "$LAUNCH_FILE"
     if [ ! -f "$EMU_LAUNCH" ] || [ ! -f "$ROM" ]; then
         echo "launch: missing emulator or ROM: '$EMU_LAUNCH' '$ROM'" >&2
         break
     fi
 
-    play "$EMU_LAUNCH" "$ROM"
+    case "$SLOT" in
+        [0-9]) ;;
+        *) SLOT=8 ;;
+    esac
+    play "$EMU_LAUNCH" "$ROM" "$SLOT"
     set -- --returning
 done
 exit 0

@@ -4,6 +4,7 @@
 #include "apostrophe.h"
 #include "apostrophe_widgets.h"
 
+#include "choice.h"
 #include "club.h"
 #include "launch.h"
 #include "roms.h"
@@ -223,18 +224,39 @@ static void Play(int index) {
         return;
     }
 
-    snprintf(message, sizeof(message), "Play %s?", file);
-    ap_footer_item footer[] = {
-        { .button = AP_BTN_B, .label = "Cancel" },
-        { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
-    };
-    ap_message_opts confirm = {
-        .message = message,
-        .footer = footer, .footer_count = sizeof(footer) / sizeof(footer[0]),
-    };
-    ap_confirm_result answer;
-    ap_confirmation(&confirm, &answer);
-    if (!answer.confirmed) return;
+    /* As NextUI's menu does: with a save state, resuming it is the default
+       and starting over the alternative; without one, a plain Play. */
+    int slot = LAUNCH_FRESH_SLOT;
+    Launch_Resume resume;
+    if (Launch_FindResume(job.match.rom_path, &resume)) {
+        snprintf(message, sizeof(message), "Resume %s from save slot %d?", file, resume.slot + 1);
+        ap_footer_item footer[] = {
+            { .button = AP_BTN_B, .label = "Cancel" },
+            { .button = AP_BTN_X, .label = "Start Over" },
+            { .button = AP_BTN_A, .label = "Resume", .is_confirm = true },
+        };
+        ChoiceOpts choice = {
+            .message = message,
+            .image_path = resume.preview[0] ? resume.preview : NULL,
+            .footer = footer,
+            .footer_count = sizeof(footer) / sizeof(footer[0]),
+        };
+        ap_button answer = Choice(&choice);
+        if (answer == AP_BTN_B) return;
+        if (answer == AP_BTN_A) slot = resume.slot;
+    } else {
+        snprintf(message, sizeof(message), "Play %s?", file);
+        ap_footer_item footer[] = {
+            { .button = AP_BTN_B, .label = "Cancel" },
+            { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
+        };
+        ChoiceOpts choice = {
+            .message = message,
+            .footer = footer,
+            .footer_count = sizeof(footer) / sizeof(footer[0]),
+        };
+        if (Choice(&choice) != AP_BTN_A) return;
+    }
 
     /* Best effort: without it the app just reopens at the top. */
     FILE *selection = fopen(LAUNCH_SELECTION_FILE, "w");
@@ -243,7 +265,7 @@ static void Play(int index) {
         fclose(selection);
     }
 
-    if (!Launch_HandOff(&job.match)) {
+    if (!Launch_HandOff(&job.match, slot)) {
         InfoView("Could not hand the game over to the launcher.");
         return;
     }

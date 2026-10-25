@@ -491,6 +491,18 @@ bool Roms_HashFile(int console_id, const char *path, char hash[33]) {
 
 /* ── Search ──────────────────────────────────────────────────────────────── */
 
+bool Roms_TagForPath(const char *rom_path, char *tag, size_t tag_size) {
+    char root[512];
+    if (!Roms_RootPath(root, sizeof(root))) return false;
+    size_t root_len = strlen(root);
+    if (strncmp(rom_path, root, root_len) != 0 || rom_path[root_len] != '/') return false;
+
+    const char *rel = rom_path + root_len + 1;
+    char top[256];
+    snprintf(top, sizeof(top), "%.*s", (int)strcspn(rel, "/"), rel);
+    return FolderTag(top, tag, tag_size);
+}
+
 bool Roms_RootPath(char *out, size_t out_size) {
     const char *roms = getenv("ROMS_PATH");
     const char *sdcard = getenv("SDCARD_PATH");
@@ -587,10 +599,7 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
             if (HasHash(&game, hash)) {
                 snprintf(match->rom_path, sizeof(match->rom_path), "%s", c->path);
                 char tag[32] = "";
-                const char *rel = c->path + strlen(root) + 1;
-                char top[256];
-                snprintf(top, sizeof(top), "%.*s", (int)strcspn(rel, "/"), rel);
-                if (FolderTag(top, tag, sizeof(tag))) {
+                if (Roms_TagForPath(c->path, tag, sizeof(tag))) {
                     FindEmulator(tag, match->emu_launch, sizeof(match->emu_launch));
                 }
                 result = ROMS_FOUND;

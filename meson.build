@@ -34,7 +34,7 @@ club_sources = files(
 )
 
 executable('prgc-tracker',
-  files('src/main.c', 'src/views.c', 'src/subtitle_list.c', 'src/launch.c') + club_sources,
+  files('src/main.c', 'src/views.c', 'src/subtitle_list.c', 'src/choice.c', 'src/launch.c') + club_sources,
   include_directories: inc_dir,
   dependencies: [apostrophe_dep, curl_dep, rcheevos_dep, zlib_dep, m_dep],
   override_options: c11,

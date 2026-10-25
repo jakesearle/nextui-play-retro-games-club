@@ -44,6 +44,10 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
    hashed by the file inside. */
 bool Roms_HashFile(int console_id, const char *path, char hash[33]);
 
+/* The emulator tag of the Roms folder a ROM is in, as NextUI's getEmuName
+   reads it: ".../Roms/Super Nintendo (SFC)/sub/x.sfc" -> "SFC". */
+bool Roms_TagForPath(const char *rom_path, char *tag, size_t tag_size);
+
 /* Where ROMs live: $ROMS_PATH, else $SDCARD_PATH/Roms, else ~/Roms. */
 bool Roms_RootPath(char *out, size_t out_size);
 

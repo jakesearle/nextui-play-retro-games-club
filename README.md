@@ -37,14 +37,18 @@ does not:
    [rcheevos](https://github.com/RetroAchievements/rcheevos) at the exact
    version NextUI's own RA support uses. Hashes are cached by path, size and
    modified time, so only new ROMs are ever read again.
-4. On a match it confirms the file, adds it to Recently Played, writes the
+4. If the game has a save state, the Pak offers to resume it, as NextUI's
+   menu does with X: the last slot used, read from
+   `.userdata/shared/.minui/<TAG>/<rom>.txt`, shown with minarch's
+   screenshot of it. **A** resumes, **X** starts over (slot 8, NextUI's
+   fresh start), **B** cancels. Without a save state it just asks to play.
+5. On a match it confirms the file, adds it to Recently Played, writes the
    emulator and ROM to `/tmp/prgc-tracker-launch` and exits. `launch.sh` then
-   starts the game the way NextUI's menu would: resume slot 8 (where the game
-   was last left), Game Time tracking, and the `pre-launch.d` and
+   starts the game the way NextUI's menu would: Game Time tracking, and the `pre-launch.d` and
    `post-launch.d` hooks with NextUI's `HOOK_*` variables. NextUI offers paks
    no way to launch a ROM themselves: hooks only observe, and `/tmp/next` is
    deleted as soon as a pak exits.
-5. When the game is closed, `launch.sh` opens the Pak again on the game you
+6. When the game is closed, `launch.sh` opens the Pak again on the game you
    played, reusing the page it fetched before (if under 15 minutes old)
    instead of downloading it again. Quitting the Pak returns to NextUI.
 
