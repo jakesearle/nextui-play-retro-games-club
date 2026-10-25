@@ -122,7 +122,7 @@ Tools/tg5040/PRGC Tracker.pak/
 
 The saved page and box art live in `$SHARED_USERDATA_PATH/prgc-tracker` on
 device (`~/.userdata/prgc-tracker` elsewhere), along with RA's hash lists and
-the ROM hash cache (`hashes.tsv`); the log is
+the ROM hash cache (`hashes-v2.tsv`); the log is
 `$LOGS_PATH/prgc-tracker.txt`.
 
 ## Publishing to the Pak Store

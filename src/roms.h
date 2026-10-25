@@ -40,6 +40,10 @@ int Roms_GameIdFromUrl(const char *url);
 Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match *match,
                       float *progress, const int *cancel);
 
+/* One ROM's RA hash, as minarch computes it: zipped cartridge ROMs are
+   hashed by the file inside. */
+bool Roms_HashFile(int console_id, const char *path, char hash[33]);
+
 /* Where ROMs live: $ROMS_PATH, else $SDCARD_PATH/Roms, else ~/Roms. */
 bool Roms_RootPath(char *out, size_t out_size);
 

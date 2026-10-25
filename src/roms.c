@@ -5,6 +5,8 @@
 #define ROMS_MAX_CANDIDATES 8192
 /* Roms/<Console (TAG)>/ plus a couple of levels of user subfolders. */
 #define ROMS_MAX_DEPTH 3
+/* The largest ROM unzipped into memory for hashing; N64 tops out at 64 MB. */
+#define ROMS_MAX_UNZIPPED (128u * 1024 * 1024)
 
 #include <ctype.h>
 #include <dirent.h>
@@ -19,6 +21,7 @@
 
 #include "io.h"
 #include "paths.h"
+#include "romzip.h"
 #include "roms.h"
 
 /* ── Consoles ────────────────────────────────────────────────────────────── */
@@ -215,7 +218,7 @@ static bool HasHash(const GameHashes *game, const char *hash) {
 
 /* ── Local hash cache ────────────────────────────────────────────────────── */
 
-/* hashes.tsv: one "<console>\t<size>\t<mtime>\t<md5>\t<path>" line per file.
+/* hashes-v2.tsv: one "<console>\t<size>\t<mtime>\t<md5>\t<path>" line per file.
    Appended to as files are hashed; a changed file just gets a newer line,
    and lookups take the last match. */
 typedef struct {
@@ -255,7 +258,9 @@ static void CacheLoad(HashCache *cache) {
     memset(cache, 0, sizeof(*cache));
     char dir[400];
     if (!Paths_UserData(dir, sizeof(dir), NULL) || !Paths_MakeDirs(dir)) return;
-    snprintf(cache->path, sizeof(cache->path), "%s/hashes.tsv", dir);
+    /* v2: v1 hashed zipped cartridge ROMs as archives, which never match, so
+       its entries for them are wrong; starting a new file drops them all. */
+    snprintf(cache->path, sizeof(cache->path), "%s/hashes-v2.tsv", dir);
 
     FILE *f = fopen(cache->path, "r");
     if (!f) return;
@@ -465,6 +470,25 @@ static void FindEmulator(const char *tag, char *out, size_t out_size) {
     }
 }
 
+/* ── Hashing ─────────────────────────────────────────────────────────────── */
+
+/* Hashes a ROM the way minarch does when it identifies a game. A zipped
+   cartridge ROM is unzipped first and the file inside hashed, since that is
+   what minarch hands rcheevos. Arcade zips stay zipped: their cores load
+   them directly, and RA identifies arcade games by file name anyway. */
+bool Roms_HashFile(int console_id, const char *path, char hash[33]) {
+    if (strcasecmp(Extension(path), "zip") == 0 && console_id != RC_CONSOLE_ARCADE) {
+        size_t size = 0;
+        char inner[256];
+        uint8_t *data = RomZip_ExtractFirstRom(path, ROMS_MAX_UNZIPPED, &size, inner, sizeof(inner));
+        if (!data) return false;
+        bool ok = rc_hash_generate_from_buffer(hash, (uint32_t)console_id, data, size) != 0;
+        free(data);
+        return ok;
+    }
+    return rc_hash_generate_from_file(hash, (uint32_t)console_id, path) != 0;
+}
+
 /* ── Search ──────────────────────────────────────────────────────────────── */
 
 bool Roms_RootPath(char *out, size_t out_size) {
@@ -505,7 +529,9 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
             char dir[512];
             if (snprintf(dir, sizeof(dir), "%s/%s", root, e->d_name) >= (int)sizeof(dir)) continue;
             any_folder = true;
+            int before = list.count;
             Collect(&list, dir, folder_console, 1);
+            fprintf(stderr, "find: %s: %d files\n", dir, list.count - before);
         }
         closedir(d);
     }
@@ -516,6 +542,9 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
     if (CdVariant(console_id) != RC_CONSOLE_UNKNOWN) {
         have_list = LoadGameHashes(CdVariant(console_id), game_id, &game) || have_list;
     }
+
+    fprintf(stderr, "find: game %d on console %d: RA lists %d hashes%s\n", game_id, console_id,
+            game.count, have_list ? "" : " (no hash list available)");
 
     Roms_Result result = ROMS_NOT_FOUND;
     if (!have_list) {
@@ -546,12 +575,14 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
                                              (long long)info.st_mtime, c->path);
             if (cached) {
                 snprintf(hash, sizeof(hash), "%s", cached);
-            } else if (rc_hash_generate_from_file(hash, (uint32_t)hash_console, c->path)) {
+            } else if (Roms_HashFile(hash_console, c->path, hash)) {
                 CacheStore(&cache, hash_console, (long long)info.st_size,
                            (long long)info.st_mtime, hash, c->path);
             } else {
+                fprintf(stderr, "find: could not hash %s\n", c->path);
                 continue; /* unreadable or a format rcheevos cannot hash */
             }
+            fprintf(stderr, "find: %s %s%s\n", hash, c->path, cached ? " (cached)" : "");
 
             if (HasHash(&game, hash)) {
                 snprintf(match->rom_path, sizeof(match->rom_path), "%s", c->path);

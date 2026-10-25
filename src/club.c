@@ -10,8 +10,15 @@
 
 /* ── Parsing ─────────────────────────────────────────────────────────────── */
 
+/* Copies in, cut short to fit. Spelled out rather than snprintf so the
+   device compiler's -Wformat-truncation does not flag the cut, which is
+   intended: chip labels are short, and a longer one is still readable. */
 static void CopyString(char *out, size_t out_size, const char *in) {
-    snprintf(out, out_size, "%s", in);
+    if (out_size == 0) return;
+    size_t len = strlen(in);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, in, len);
+    out[len] = '\0';
 }
 
 /* Turns one stat chip into a key and value. The chips read "33 beaten",

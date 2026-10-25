@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[1], "--hash") == 0) {
         char hash[33];
         rc_hash_init_default_cdreader();
-        bool ok = rc_hash_generate_from_file(hash, (uint32_t)atoi(argv[2]), argv[3]);
+        bool ok = Roms_HashFile(atoi(argv[2]), argv[3], hash);
         printf("%s\n", ok ? hash : "(could not hash)");
         return ok ? 0 : 1;
     }

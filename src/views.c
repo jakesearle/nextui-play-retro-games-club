@@ -59,7 +59,7 @@ static void FormatTitle(const char *title, char *out, size_t out_size) {
         snprintf(out, out_size, "%s", title);
         return;
     }
-    char age[16];
+    char age[24]; /* room for any long, so GCC sees it cannot truncate */
     FormatAge(g_data.age_seconds, age, sizeof(age));
     snprintf(out, out_size, "%s (saved %s ago)", title, age);
 }
