@@ -6,6 +6,8 @@
 #include "apostrophe_widgets.h"
 
 #include "club.h"
+#include "paths.h"
+#include "qr.h"
 #include "decide.h"
 #include "launch.h"
 #include "roms.h"
@@ -392,6 +394,33 @@ static void Play(int index, bool resume) {
 
 /* ── Views ───────────────────────────────────────────────────────────────── */
 
+/* Draws a pick's links as QR codes into the image cache, named by what
+   they encode and how big, so a pick's codes are drawn once per size. */
+static bool LinksImage(const Qr_Link *links, int count, char *out, size_t out_size,
+                       int *out_w, int *out_h) {
+    /* About a third of the screen across each: two fit side by side with
+       room between, and a phone reads them from arm's length. */
+    int qr_size = ap_get_screen_width() * 3 / 10;
+    int gap = qr_size / 4;
+
+    unsigned long hash = 5381;
+    for (int i = 0; i < count; i++) {
+        for (const char *p = links[i].caption; *p; p++) hash = hash * 33 + (unsigned char)*p;
+        for (const char *p = links[i].url; *p; p++) hash = hash * 33 + (unsigned char)*p;
+    }
+    hash = hash * 33 + (unsigned long)qr_size;
+
+    char dir[400];
+    if (!Paths_UserData(dir, sizeof(dir), "images") || !Paths_MakeDirs(dir)) return false;
+    int written = snprintf(out, out_size, "%s/links-%08lx.bmp", dir, hash & 0xFFFFFFFFul);
+    if (written < 0 || (size_t)written >= out_size) return false;
+
+    ap_color text = ap_get_theme()->text;
+    SDL_Color color = { text.r, text.g, text.b, text.a };
+    return Qr_RenderLinks(links, count, ap_get_font(AP_FONT_TINY), color, qr_size, gap,
+                          out, out_w, out_h);
+}
+
 static void PickView(int index) {
     const Club_Pick *pick = &g_data.picks[index];
 
@@ -447,12 +476,16 @@ static void PickView(int index) {
         info_count += row_count;
     }
 
-    /* The device cannot open a browser, but the addresses are still useful
-       to read off and look up later. */
-    ap_detail_info_pair links[2];
+    /* The device cannot open a browser, so links are QR codes to scan
+       with a phone. */
+    Qr_Link links[2];
     int link_count = 0;
-    if (pick->ra_url[0]) links[link_count++] = (ap_detail_info_pair){ "RetroAchievements", pick->ra_url };
-    if (pick->guide_url[0]) links[link_count++] = (ap_detail_info_pair){ "Guide", pick->guide_url };
+    if (pick->ra_url[0]) links[link_count++] = (Qr_Link){ "RetroAchievements", pick->ra_url };
+    if (pick->guide_url[0]) links[link_count++] = (Qr_Link){ "Guide", pick->guide_url };
+    char links_image[512];
+    int links_w = 0, links_h = 0;
+    bool has_links = link_count > 0 &&
+                     LinksImage(links, link_count, links_image, sizeof(links_image), &links_w, &links_h);
 
     ap_detail_section sections[5];
     int section_count = 0;
@@ -469,15 +502,15 @@ static void PickView(int index) {
         sections[section_count++] = (ap_detail_section){
             .type = AP_SECTION_INFO, .info_pairs = info, .info_count = info_count };
     }
+    if (has_links) {
+        sections[section_count++] = (ap_detail_section){
+            .type = AP_SECTION_IMAGE, .title = "Links", .image_path = links_image,
+            .image_w = links_w, .image_h = links_h };
+    }
     if (pick->description[0]) {
         sections[section_count++] = (ap_detail_section){
             .type = AP_SECTION_DESCRIPTION, .title = "About",
             .description = pick->description };
-    }
-    if (link_count > 0) {
-        sections[section_count++] = (ap_detail_section){
-            .type = AP_SECTION_INFO, .title = "Links",
-            .info_pairs = links, .info_count = link_count };
     }
 
     char title[SCREEN_TITLE_MAX];

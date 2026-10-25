@@ -20,6 +20,7 @@ m_dep = meson.get_compiler('c').find_library('m', required: false)
 # Unzipping zipped ROMs to hash them. The device already loads libz for curl.
 zlib_dep = dependency('zlib', required: true)
 rcheevos_dep = dependency('rcheevos_hash', required: true)
+qrcodegen_dep = dependency('qrcodegen', required: true)
 
 inc_dir = include_directories('src')
 
@@ -35,9 +36,9 @@ club_sources = files(
 )
 
 executable('prgc-tracker',
-  files('src/main.c', 'src/views.c', 'src/subtitle_list.c', 'src/launch.c') + club_sources,
+  files('src/main.c', 'src/views.c', 'src/subtitle_list.c', 'src/launch.c', 'src/qr.c') + club_sources,
   include_directories: inc_dir,
-  dependencies: [apostrophe_dep, curl_dep, rcheevos_dep, zlib_dep, m_dep],
+  dependencies: [apostrophe_dep, curl_dep, rcheevos_dep, qrcodegen_dep, zlib_dep, m_dep],
   override_options: c11,
   install: true
 )
