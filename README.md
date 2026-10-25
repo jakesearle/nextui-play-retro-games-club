@@ -39,25 +39,33 @@ does not:
    (`dorequest.php?r=hashlibrary`, no account needed) and keeps it for three
    days.
 3. It hashes the ROMs in `Roms/` folders whose tag belongs to that console
-   (`Super Nintendo (SFC)` → SFC), best-named first, with
+   (`Super Nintendo (SFC)` → SFC), subfolders included, with
    [rcheevos](https://github.com/RetroAchievements/rcheevos) at the exact
-   version NextUI's own RA support uses. Hashes are cached by path, size and
-   modified time, so only new ROMs are ever read again.
-4. Resume reads the last save slot you used for the ROM from where minarch
+   version NextUI's own RA support uses. Every file is checked, so the first
+   search of a folder reads it all; hashes are cached by path, size and
+   modified time, so after that only new ROMs are read.
+4. If several files are the game (a duplicate, or a variant RA lists under
+   the same game, like an MSU-1 version beside the plain one), the one with a
+   save state wins, then the one played most recently; failing both, the
+   Pak asks which copy. Once played it is in Recently Played, so that
+   question comes up once.
+5. Resume reads the last save slot you used for the ROM from where minarch
    records it, `.userdata/shared/.minui/<TAG>/<rom>.txt`; Play, or a game
    with no save, asks minarch for slot 8, its fresh start.
-5. On a match it adds the game to Recently Played, writes the
+6. On a match it adds the game to Recently Played, writes the
    emulator and ROM to `/tmp/prgc-tracker-launch` and exits. `launch.sh` then
    starts the game the way NextUI's menu would: Game Time tracking, and the `pre-launch.d` and
    `post-launch.d` hooks with NextUI's `HOOK_*` variables. NextUI offers paks
    no way to launch a ROM themselves: hooks only observe, and `/tmp/next` is
    deleted as soon as a pak exits.
-6. When the game is closed, `launch.sh` opens the Pak again on the game you
+7. When the game is closed, `launch.sh` opens the Pak again on the game you
    played, reusing the page it fetched before (if under 15 minutes old)
    instead of downloading it again. Quitting the Pak returns to NextUI.
 
-Consoles NextUI has no emulator for (N64, GameCube...) report that there is
-no folder for them, unless a community pak has added one. CHD disc images are
+For a console with an emulator in the Pak Store for this device (Nintendo 64,
+Dreamcast, PPSSPP on TrimUI) but none installed, the Pak says which one to
+download. Any other RetroAchievements console NextUI cannot run (GameCube,
+Wii, PS2, Saturn...) is reported as such. CHD disc images are
 not hashed yet. Arcade games are identified by file name, as RA does, so they
 need their standard MAME/FBNeo names.
 
@@ -83,6 +91,27 @@ which is the quickest way to check a markup change:
 task scrape                   # live page
 task scrape FILE=saved.html   # a saved copy
 ```
+
+## Tests
+
+```
+task test
+```
+
+`meson test` runs the rules behind Play against fixture SD cards: fake ROMs
+generated on the fly (zipped with zlib where a test needs it), fixture RA
+hash lists, and stand-ins for the emulator, NextUI's hook runner and the
+CPU governor. Nothing touches the network or needs a real ROM.
+
+| Suite | Covers |
+|---|---|
+| `tests/test_roms.c` | Pick → console and game id; hashing as minarch does (zips, copier and iNES headers, arcade by name); every search result: no folder, empty folders, no match, offline, found with its emulator, duplicates and variants, all of a console's folders, deep subfolders, `.bin` tracks owned by a `.cue`, CD games in the cartridge folder, the hash cache |
+| `tests/test_decide.c` | Which copy to play (save state, then Recently Played, then ask) and what each result tells the player (missing NextUI folder, Pak Store emulator, can't play), per device |
+| `tests/test_launch.c` | Resume slots, Recently Played (order, aliases, the 24-entry cap) and the hand-off file |
+| `tests/test_launch_sh.sh` | `launch.sh`: the app → game → app loop, slot fallback, missing ROMs, hooks, the governor, paths with quotes |
+
+The rules themselves live outside the screens, in `src/decide.c`, so the
+tests do not need SDL. They check which outcome is chosen, not its wording.
 
 ## Requirements
 

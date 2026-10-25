@@ -1,11 +1,12 @@
-# Only rhash, rcheevos' ROM hashing, which is all PRGC Tracker needs: no
-# runtime, no rc_client, no network layer.
+# Only rhash, rcheevos' ROM hashing, and its console names: no runtime, no
+# rc_client, no network layer.
 project('rcheevos', 'c', default_options: ['c_std=gnu99'])
 
 rcheevos_hash_lib = static_library('rcheevos_hash',
   files(
     'src/rc_compat.c',
     'src/rc_util.c',
+    'src/rcheevos/consoleinfo.c',
     'src/rhash/aes.c',
     'src/rhash/cdreader.c',
     'src/rhash/hash.c',

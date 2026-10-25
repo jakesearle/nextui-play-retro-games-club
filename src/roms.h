@@ -17,6 +17,7 @@ typedef enum {
     ROMS_NOT_FOUND,       /* Searched every candidate; none matched */
     ROMS_UNKNOWN_CONSOLE, /* The title names a console we cannot map */
     ROMS_NO_FOLDER,       /* No Roms folder for that console */
+    ROMS_NO_GAMES,        /* Its folders exist but hold no games */
     ROMS_NO_HASHES,       /* RA's hash list is unreachable and not cached */
     ROMS_CANCELLED,
 } Roms_Result;
@@ -28,16 +29,43 @@ typedef struct {
     char emu_launch[512];
 } Roms_Match;
 
+/* Every ROM that is this game: duplicates, and variants RA lists under the
+   same game (an MSU-1 version beside the plain one, say). Best-named
+   first. Choosing between them is the caller's business. */
+#define ROMS_MAX_MATCHES 16
+typedef struct {
+    Roms_Match items[ROMS_MAX_MATCHES];
+    int count;
+} Roms_Matches;
+
 /* The RA console id for a title like "Paper Mario (N64)", or 0. The label
    itself ("N64") is copied to label_out for messages. */
 int Roms_ConsoleFromTitle(const char *title, char *label_out, size_t label_size);
 
+/* A console's name for messages, "Nintendo 64" for RC_CONSOLE_NINTENDO_64;
+   RA's own name for consoles the club has not picked from yet. NULL for an
+   id RA does not know. */
+const char *Roms_ConsoleName(int console_id);
+
+/* The Roms folder NextUI creates for the console, "Nintendo Entertainment
+   System (FC)", or NULL if it creates none. */
+const char *Roms_NextUIFolder(int console_id);
+
+/* Whether NextUI ships an emulator for the console. */
+bool Roms_NextUIPlays(int console_id);
+
+/* The name of a Pak Store emulator pak for the console that runs on this
+   platform ($PLATFORM), as the store lists it ("Nintendo 64"), or NULL. */
+const char *Roms_PakStoreEmulator(int console_id);
+
 /* The game id in a retroachievements.org/game/<id> link, or 0. */
 int Roms_GameIdFromUrl(const char *url);
 
-/* Searches the Roms folders. Blocking and slow on a cold cache; run it on a
-   worker. progress (0..1) and cancel may be NULL. */
-Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match *match,
+/* Searches the Roms folders for every copy of the game. Blocking, and slow
+   the first time a folder is searched (every file in it is read once and
+   its hash cached); run it on a worker. progress (0..1) and cancel may be
+   NULL. */
+Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Matches *matches,
                       float *progress, const int *cancel);
 
 /* One ROM's RA hash, as minarch computes it: zipped cartridge ROMs are

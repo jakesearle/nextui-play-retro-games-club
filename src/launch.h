@@ -35,6 +35,10 @@ bool Launch_FindResume(const char *rom_path, Launch_Resume *resume);
    exits. */
 bool Launch_HandOff(const Roms_Match *match, int resume_slot);
 
+/* Where the ROM is in NextUI's Recently Played: 0 for the most recent,
+   -1 if it is not listed. */
+int Launch_RecentRank(const char *rom_path);
+
 /* Moves path to the top of NextUI's Recently Played, adding it if new and
    keeping NextUI's limit. Exposed for testing; Launch_HandOff calls it. */
 bool Launch_AddRecent(const char *rom_path);

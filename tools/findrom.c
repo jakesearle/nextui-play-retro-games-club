@@ -22,6 +22,7 @@ static const char *ResultName(Roms_Result result) {
     case ROMS_NOT_FOUND: return "not found";
     case ROMS_UNKNOWN_CONSOLE: return "unknown console";
     case ROMS_NO_FOLDER: return "no Roms folder for this console";
+    case ROMS_NO_GAMES: return "folder exists but holds no games";
     case ROMS_NO_HASHES: return "no RA hash list (offline?)";
     case ROMS_CANCELLED: return "cancelled";
     }
@@ -55,13 +56,13 @@ int main(int argc, char **argv) {
         int console_id = Roms_ConsoleFromTitle(pick->title, label, sizeof(label));
         int game_id = Roms_GameIdFromUrl(pick->ra_url);
 
-        Roms_Match match;
-        Roms_Result result = Roms_Find(game_id, console_id, pick->title, &match, NULL, NULL);
+        static Roms_Matches matches;
+        Roms_Result result = Roms_Find(game_id, console_id, pick->title, &matches, NULL, NULL);
         printf("\n%s\n  console %s = %d, game %d: %s\n", pick->title, label, console_id, game_id,
                ResultName(result));
-        if (result == ROMS_FOUND) {
-            printf("  rom: %s\n  emulator: %s\n", match.rom_path,
-                   match.emu_launch[0] ? match.emu_launch : "(none installed)");
+        for (int m = 0; m < matches.count; m++) {
+            printf("  rom: %s\n  emulator: %s\n", matches.items[m].rom_path,
+                   matches.items[m].emu_launch[0] ? matches.items[m].emu_launch : "(none installed)");
         }
     }
 

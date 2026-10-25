@@ -26,6 +26,7 @@ inc_dir = include_directories('src')
 # Everything but the UI, shared with the tools.
 club_sources = files(
   'src/club.c',
+  'src/decide.c',
   'src/html.c',
   'src/io.c',
   'src/paths.c',
@@ -52,4 +53,18 @@ if not meson.is_cross_build()
       override_options: c11,
     )
   endforeach
+
+  # `task test`: the rules behind Play, against fixture SD cards and hash
+  # lists, with no network and no real ROMs.
+  foreach name : ['roms', 'decide', 'launch']
+    test(name, executable('test_' + name,
+      files('tests/test_' + name + '.c', 'src/launch.c') + club_sources,
+      include_directories: [inc_dir, include_directories('tests')],
+      dependencies: [curl_dep, rcheevos_dep, zlib_dep],
+      override_options: c11,
+    ), is_parallel: false)
+  endforeach
+  test('launch.sh', find_program('sh'),
+    args: [files('tests/test_launch_sh.sh'), files('pak/launch.sh')],
+    is_parallel: false)
 endif

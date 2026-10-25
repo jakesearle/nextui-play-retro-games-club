@@ -3,8 +3,9 @@
 #define ROMS_HASHLIB_MAX_AGE_SECONDS (3L * 24 * 60 * 60)
 #define ROMS_MAX_GAME_HASHES 128
 #define ROMS_MAX_CANDIDATES 8192
-/* Roms/<Console (TAG)>/ plus a couple of levels of user subfolders. */
-#define ROMS_MAX_DEPTH 3
+/* Roms/<Console (TAG)>/ plus however the player sorts their games, short of
+   following a symlink loop forever. */
+#define ROMS_MAX_DEPTH 12
 /* The largest ROM unzipped into memory for hashing; N64 tops out at 64 MB. */
 #define ROMS_MAX_UNZIPPED (128u * 1024 * 1024)
 
@@ -28,38 +29,69 @@
 
 /* The labels the club page puts in parentheses after a title. Collected
    from its history, plus the obvious neighbours. */
-static const struct { const char *label; int console_id; } k_labels[] = {
-    { "Arcade", RC_CONSOLE_ARCADE },
-    { "NES", RC_CONSOLE_NINTENDO },
-    { "FDS", RC_CONSOLE_FAMICOM_DISK_SYSTEM },
-    { "SNES", RC_CONSOLE_SUPER_NINTENDO },
-    { "N64", RC_CONSOLE_NINTENDO_64 },
-    { "GC", RC_CONSOLE_GAMECUBE },
-    { "Wii", RC_CONSOLE_WII },
-    { "GB", RC_CONSOLE_GAMEBOY },
-    { "GBC", RC_CONSOLE_GAMEBOY_COLOR },
-    { "GBA", RC_CONSOLE_GAMEBOY_ADVANCE },
-    { "NDS", RC_CONSOLE_NINTENDO_DS },
-    { "VB", RC_CONSOLE_VIRTUAL_BOY },
-    { "MD", RC_CONSOLE_MEGA_DRIVE },
-    { "Genesis", RC_CONSOLE_MEGA_DRIVE },
-    { "SMS", RC_CONSOLE_MASTER_SYSTEM },
-    { "GG", RC_CONSOLE_GAME_GEAR },
-    { "SCD", RC_CONSOLE_SEGA_CD },
-    { "32X", RC_CONSOLE_SEGA_32X },
-    { "Saturn", RC_CONSOLE_SATURN },
-    { "DC", RC_CONSOLE_DREAMCAST },
-    { "PS1", RC_CONSOLE_PLAYSTATION },
-    { "PSX", RC_CONSOLE_PLAYSTATION },
-    { "PS2", RC_CONSOLE_PLAYSTATION_2 },
-    { "PSP", RC_CONSOLE_PSP },
-    { "PCE", RC_CONSOLE_PC_ENGINE },
-    { "TG16", RC_CONSOLE_PC_ENGINE },
-    { "NGP", RC_CONSOLE_NEOGEO_POCKET },
-    { "NGPC", RC_CONSOLE_NEOGEO_POCKET },
-    { "Lynx", RC_CONSOLE_ATARI_LYNX },
-    { "2600", RC_CONSOLE_ATARI_2600 },
-    { "7800", RC_CONSOLE_ATARI_7800 },
+static const struct { const char *label; int console_id; const char *name; } k_labels[] = {
+    { "Arcade", RC_CONSOLE_ARCADE, "arcade" },
+    { "NES", RC_CONSOLE_NINTENDO, "NES" },
+    { "FDS", RC_CONSOLE_FAMICOM_DISK_SYSTEM, "Famicom Disk System" },
+    { "SNES", RC_CONSOLE_SUPER_NINTENDO, "SNES" },
+    { "N64", RC_CONSOLE_NINTENDO_64, "Nintendo 64" },
+    { "GC", RC_CONSOLE_GAMECUBE, "GameCube" },
+    { "Wii", RC_CONSOLE_WII, "Wii" },
+    { "GB", RC_CONSOLE_GAMEBOY, "Game Boy" },
+    { "GBC", RC_CONSOLE_GAMEBOY_COLOR, "Game Boy Color" },
+    { "GBA", RC_CONSOLE_GAMEBOY_ADVANCE, "Game Boy Advance" },
+    { "NDS", RC_CONSOLE_NINTENDO_DS, "Nintendo DS" },
+    { "VB", RC_CONSOLE_VIRTUAL_BOY, "Virtual Boy" },
+    { "MD", RC_CONSOLE_MEGA_DRIVE, "Genesis" },
+    { "Genesis", RC_CONSOLE_MEGA_DRIVE, "Genesis" },
+    { "SMS", RC_CONSOLE_MASTER_SYSTEM, "Master System" },
+    { "GG", RC_CONSOLE_GAME_GEAR, "Game Gear" },
+    { "SCD", RC_CONSOLE_SEGA_CD, "Sega CD" },
+    { "32X", RC_CONSOLE_SEGA_32X, "32X" },
+    { "Saturn", RC_CONSOLE_SATURN, "Saturn" },
+    { "DC", RC_CONSOLE_DREAMCAST, "Dreamcast" },
+    { "PS1", RC_CONSOLE_PLAYSTATION, "PlayStation" },
+    { "PSX", RC_CONSOLE_PLAYSTATION, "PlayStation" },
+    { "PS2", RC_CONSOLE_PLAYSTATION_2, "PlayStation 2" },
+    { "PSP", RC_CONSOLE_PSP, "PSP" },
+    { "PCE", RC_CONSOLE_PC_ENGINE, "PC Engine" },
+    { "TG16", RC_CONSOLE_PC_ENGINE, "TurboGrafx-16" },
+    { "NGP", RC_CONSOLE_NEOGEO_POCKET, "Neo Geo Pocket" },
+    { "NGPC", RC_CONSOLE_NEOGEO_POCKET, "Neo Geo Pocket Color" },
+    { "Lynx", RC_CONSOLE_ATARI_LYNX, "Lynx" },
+    { "2600", RC_CONSOLE_ATARI_2600, "Atari 2600" },
+    { "7800", RC_CONSOLE_ATARI_7800, "Atari 7800" },
+};
+
+/* Other ways a title might name a RetroAchievements console, mostly the
+   short forms emulator frontends use. Anything not here is still matched
+   against RA's own names (rc_console_name). */
+static const struct { const char *label; int console_id; } k_aliases[] = {
+    { "FC", RC_CONSOLE_NINTENDO }, { "Famicom", RC_CONSOLE_NINTENDO },
+    { "SFC", RC_CONSOLE_SUPER_NINTENDO }, { "Super Famicom", RC_CONSOLE_SUPER_NINTENDO },
+    { "Mega Drive", RC_CONSOLE_MEGA_DRIVE }, { "GEN", RC_CONSOLE_MEGA_DRIVE },
+    { "Sega CD", RC_CONSOLE_SEGA_CD }, { "Mega CD", RC_CONSOLE_SEGA_CD },
+    { "SAT", RC_CONSOLE_SATURN }, { "PS", RC_CONSOLE_PLAYSTATION },
+    { "PCECD", RC_CONSOLE_PC_ENGINE_CD }, { "PCE-CD", RC_CONSOLE_PC_ENGINE_CD },
+    { "TGCD", RC_CONSOLE_PC_ENGINE_CD }, { "TG-16", RC_CONSOLE_PC_ENGINE },
+    { "PCFX", RC_CONSOLE_PCFX }, { "SG1000", RC_CONSOLE_SG1000 },
+    { "Wii U", RC_CONSOLE_WII_U }, { "WiiU", RC_CONSOLE_WII_U },
+    { "3DS", RC_CONSOLE_NINTENDO_3DS }, { "DSi", RC_CONSOLE_NINTENDO_DSI },
+    { "Xbox", RC_CONSOLE_XBOX }, { "JAG", RC_CONSOLE_ATARI_JAGUAR },
+    { "Jaguar", RC_CONSOLE_ATARI_JAGUAR }, { "Jaguar CD", RC_CONSOLE_ATARI_JAGUAR_CD },
+    { "5200", RC_CONSOLE_ATARI_5200 }, { "A2600", RC_CONSOLE_ATARI_2600 },
+    { "A5200", RC_CONSOLE_ATARI_5200 }, { "A7800", RC_CONSOLE_ATARI_7800 },
+    { "ST", RC_CONSOLE_ATARI_ST }, { "WS", RC_CONSOLE_WONDERSWAN },
+    { "WSC", RC_CONSOLE_WONDERSWAN }, { "WonderSwan Color", RC_CONSOLE_WONDERSWAN },
+    { "NGCD", RC_CONSOLE_NEO_GEO_CD }, { "INTV", RC_CONSOLE_INTELLIVISION },
+    { "CV", RC_CONSOLE_COLECOVISION }, { "Coleco", RC_CONSOLE_COLECOVISION },
+    { "O2", RC_CONSOLE_MAGNAVOX_ODYSSEY2 }, { "Odyssey 2", RC_CONSOLE_MAGNAVOX_ODYSSEY2 },
+    { "DOS", RC_CONSOLE_MS_DOS }, { "C64", RC_CONSOLE_COMMODORE_64 },
+    { "CPC", RC_CONSOLE_AMSTRAD_PC }, { "A2", RC_CONSOLE_APPLE_II },
+    { "Apple 2", RC_CONSOLE_APPLE_II }, { "CDi", RC_CONSOLE_CDI },
+    { "PKM", RC_CONSOLE_POKEMON_MINI }, { "Pokemon Mini", RC_CONSOLE_POKEMON_MINI },
+    { "G&W", RC_CONSOLE_GAME_AND_WATCH }, { "N-Gage", RC_CONSOLE_NOKIA_NGAGE },
+    { "Pico", RC_CONSOLE_PICO }, { "Channel F", RC_CONSOLE_FAIRCHILD_CHANNEL_F },
 };
 
 /* Roms folder tags. NextUI's own table (minarch/ra_consoles.h), plus tags
@@ -83,7 +115,10 @@ static const struct { const char *tag; int console_id; } k_tags[] = {
     { "SGB", RC_CONSOLE_GAMEBOY }, { "SMS", RC_CONSOLE_MASTER_SYSTEM },
     { "SUPA", RC_CONSOLE_SUPER_NINTENDO }, { "VB", RC_CONSOLE_VIRTUAL_BOY },
     { "VIC", RC_CONSOLE_VIC20 },
-    /* Community paks */
+};
+
+/* Tags community emulator paks use for consoles NextUI ships without. */
+static const struct { const char *tag; int console_id; } k_community_tags[] = {
     { "N64", RC_CONSOLE_NINTENDO_64 }, { "NDS", RC_CONSOLE_NINTENDO_DS },
     { "PSP", RC_CONSOLE_PSP }, { "DC", RC_CONSOLE_DREAMCAST },
     { "FBNEO", RC_CONSOLE_ARCADE }, { "MAME", RC_CONSOLE_ARCADE },
@@ -96,7 +131,88 @@ static int ConsoleForTag(const char *tag) {
     for (size_t i = 0; i < sizeof(k_tags) / sizeof(k_tags[0]); i++) {
         if (strcasecmp(tag, k_tags[i].tag) == 0) return k_tags[i].console_id;
     }
+    for (size_t i = 0; i < sizeof(k_community_tags) / sizeof(k_community_tags[0]); i++) {
+        if (strcasecmp(tag, k_community_tags[i].tag) == 0) return k_community_tags[i].console_id;
+    }
     return RC_CONSOLE_UNKNOWN;
+}
+
+/* The empty Roms folders NextUI's install creates (skeleton/BASE and
+   EXTRAS), one per console: where its games are expected to go. */
+static const struct { int console_id; const char *folder; } k_folders[] = {
+    { RC_CONSOLE_GAMEBOY, "Game Boy (GB)" },
+    { RC_CONSOLE_GAMEBOY_ADVANCE, "Game Boy Advance (GBA)" },
+    { RC_CONSOLE_GAMEBOY_COLOR, "Game Boy Color (GBC)" },
+    { RC_CONSOLE_NINTENDO, "Nintendo Entertainment System (FC)" },
+    { RC_CONSOLE_MEGA_DRIVE, "Sega Genesis (MD)" },
+    { RC_CONSOLE_PLAYSTATION, "Sony PlayStation (PS)" },
+    { RC_CONSOLE_SUPER_NINTENDO, "Super Nintendo Entertainment System (SFC)" },
+    { RC_CONSOLE_AMIGA, "Amiga (PUAE)" },
+    { RC_CONSOLE_AMSTRAD_PC, "Amstrad CPC (CPC)" },
+    { RC_CONSOLE_ARCADE, "Arcade (FBN)" },
+    { RC_CONSOLE_ATARI_2600, "Atari 2600 (A2600)" },
+    { RC_CONSOLE_ATARI_5200, "Atari 5200 (A5200)" },
+    { RC_CONSOLE_ATARI_7800, "Atari 7800 (A7800)" },
+    { RC_CONSOLE_ATARI_LYNX, "Atari Lynx (LYNX)" },
+    { RC_CONSOLE_COLECOVISION, "Colecovision (COLECO)" },
+    { RC_CONSOLE_COMMODORE_64, "Commodore 64 (C64)" },
+    { RC_CONSOLE_VIC20, "Commodore VIC20 (VIC)" },
+    { RC_CONSOLE_FAMICOM_DISK_SYSTEM, "Famicom Disk System (FDS)" },
+    { RC_CONSOLE_MSX, "Microsoft MSX (MSX)" },
+    { RC_CONSOLE_NEOGEO_POCKET, "Neo Geo Pocket Color (NGPC)" },
+    { RC_CONSOLE_PICO, "Pico-8 (P8)" },
+    { RC_CONSOLE_POKEMON_MINI, "Pok\u00e9mon mini (PKM)" },
+    { RC_CONSOLE_SEGA_32X, "Sega 32X (32X)" },
+    { RC_CONSOLE_SEGA_CD, "Sega CD (SEGACD)" },
+    { RC_CONSOLE_GAME_GEAR, "Sega Game Gear (GG)" },
+    { RC_CONSOLE_MASTER_SYSTEM, "Sega Master System (SMS)" },
+    { RC_CONSOLE_SG1000, "Sega SG-1000 (SG1000)" },
+    { RC_CONSOLE_PC_ENGINE, "TurboGrafx-16 (PCE)" },
+    { RC_CONSOLE_VIRTUAL_BOY, "Virtual Boy (VB)" },
+};
+
+const char *Roms_NextUIFolder(int console_id) {
+    for (size_t i = 0; i < sizeof(k_folders) / sizeof(k_folders[0]); i++) {
+        if (k_folders[i].console_id == console_id) return k_folders[i].folder;
+    }
+    return NULL;
+}
+
+/* Emulator paks in the Pak Store, by its listing (storefront_base.json):
+   the name to search for and the platforms each is built for. */
+static const struct { int console_id; const char *name; const char *platforms; } k_store_paks[] = {
+    { RC_CONSOLE_NINTENDO_64, "Nintendo 64", " tg5040 tg5050 my355 h700 " },
+    { RC_CONSOLE_DREAMCAST, "Dreamcast", " tg5040 h700 " },
+    { RC_CONSOLE_PSP, "PPSSPP", " tg5040 tg5050 " },
+};
+
+const char *Roms_ConsoleName(int console_id) {
+    for (size_t i = 0; i < sizeof(k_labels) / sizeof(k_labels[0]); i++) {
+        if (k_labels[i].console_id == console_id) return k_labels[i].name;
+    }
+    const char *name = rc_console_name((uint32_t)console_id);
+    return name && strcmp(name, "Unknown") != 0 ? name : NULL;
+}
+
+bool Roms_NextUIPlays(int console_id) {
+    for (size_t i = 0; i < sizeof(k_tags) / sizeof(k_tags[0]); i++) {
+        if (k_tags[i].console_id == console_id) return true;
+    }
+    return false;
+}
+
+const char *Roms_PakStoreEmulator(int console_id) {
+    const char *platform = getenv("PLATFORM");
+    char padded[40];
+    snprintf(padded, sizeof(padded), " %s ", platform ? platform : "");
+    for (size_t i = 0; i < sizeof(k_store_paks) / sizeof(k_store_paks[0]); i++) {
+        if (k_store_paks[i].console_id != console_id) continue;
+        /* Off device there is no platform; name the pak anyway. */
+        if (!platform || !platform[0] || strstr(k_store_paks[i].platforms, padded)) {
+            return k_store_paks[i].name;
+        }
+    }
+    return NULL;
 }
 
 /* NextUI files CD games under the cartridge console's tag (PCE, MD), so a
@@ -143,6 +259,15 @@ int Roms_ConsoleFromTitle(const char *title, char *label_out, size_t label_size)
 
     for (size_t i = 0; i < sizeof(k_labels) / sizeof(k_labels[0]); i++) {
         if (strcasecmp(label, k_labels[i].label) == 0) return k_labels[i].console_id;
+    }
+    for (size_t i = 0; i < sizeof(k_aliases) / sizeof(k_aliases[0]); i++) {
+        if (strcasecmp(label, k_aliases[i].label) == 0) return k_aliases[i].console_id;
+    }
+    /* RA's own names, "Sega Saturn" or "Atari Jaguar CD". The ids past
+       Famicom Disk System are hubs and events, not consoles. */
+    for (int id = 1; id <= RC_CONSOLE_FAMICOM_DISK_SYSTEM; id++) {
+        const char *name = rc_console_name((uint32_t)id);
+        if (name && strcasecmp(label, name) == 0) return id;
     }
     return RC_CONSOLE_UNKNOWN;
 }
@@ -515,9 +640,9 @@ bool Roms_RootPath(char *out, size_t out_size) {
     return written > 0 && (size_t)written < out_size;
 }
 
-Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match *match,
+Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Matches *matches,
                       float *progress, const int *cancel) {
-    memset(match, 0, sizeof(*match));
+    memset(matches, 0, sizeof(*matches));
     if (progress) *progress = 0.0f;
     if (console_id == RC_CONSOLE_UNKNOWN || game_id <= 0) return ROMS_UNKNOWN_CONSOLE;
 
@@ -548,6 +673,9 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
         closedir(d);
     }
     if (!any_folder) return ROMS_NO_FOLDER;
+    /* NextUI creates its folders empty, so this, not a missing folder, is
+       the usual way to have none of a console's games. */
+    if (list.count == 0) return ROMS_NO_GAMES;
 
     GameHashes game = { .count = 0 };
     bool have_list = LoadGameHashes(console_id, game_id, &game);
@@ -596,14 +724,15 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
             }
             fprintf(stderr, "find: %s %s%s\n", hash, c->path, cached ? " (cached)" : "");
 
-            if (HasHash(&game, hash)) {
+            /* Keep going: every copy is needed to choose between them. */
+            if (HasHash(&game, hash) && matches->count < ROMS_MAX_MATCHES) {
+                Roms_Match *match = &matches->items[matches->count++];
                 snprintf(match->rom_path, sizeof(match->rom_path), "%s", c->path);
                 char tag[32] = "";
                 if (Roms_TagForPath(c->path, tag, sizeof(tag))) {
                     FindEmulator(tag, match->emu_launch, sizeof(match->emu_launch));
                 }
                 result = ROMS_FOUND;
-                break;
             }
         }
         CacheFree(&cache);

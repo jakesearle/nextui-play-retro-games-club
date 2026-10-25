@@ -6,6 +6,7 @@
 #include "apostrophe_widgets.h"
 
 #include "club.h"
+#include "decide.h"
 #include "launch.h"
 #include "roms.h"
 #include "subtitle_list.h"
@@ -194,7 +195,7 @@ typedef struct {
     int game_id;
     int console_id;
     const char *title;
-    Roms_Match match;
+    Roms_Matches matches;
     Roms_Result result;
     float progress;
     int cancel;
@@ -203,9 +204,73 @@ typedef struct {
 /* Runs on ap_process_message's worker thread: files and network only. */
 static int FindWorker(void *userdata) {
     FindJob *job = userdata;
-    job->result = Roms_Find(job->game_id, job->console_id, job->title, &job->match,
+    job->result = Roms_Find(job->game_id, job->console_id, job->title, &job->matches,
                             &job->progress, &job->cancel);
     return 0;
+}
+
+static const char *FileName(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+/* Which of several copies of the game to play (decide.c has the rules),
+   asking the player when the rules cannot tell. Returns an index into
+   matches, or -1 if the player backed out. */
+static int ChooseMatch(const Roms_Matches *matches) {
+    Decide_CopyInfo copies[ROMS_MAX_MATCHES];
+    for (int i = 0; i < matches->count; i++) {
+        Launch_Resume state;
+        copies[i] = (Decide_CopyInfo){
+            .has_save_state = Launch_FindResume(matches->items[i].rom_path, &state),
+            .recent_rank = Launch_RecentRank(matches->items[i].rom_path),
+        };
+    }
+    int left[ROMS_MAX_MATCHES], count = 0;
+    int chosen = Decide_Copy(copies, matches->count, left, &count);
+    if (chosen >= 0) return chosen;
+
+    /* Nothing to go on: ask, showing each copy's folder, since copies can
+       share a name across folders. Once one is played it is in Recently
+       Played, so this comes up once per game. */
+    char root[512] = "";
+    Roms_RootPath(root, sizeof(root));
+    size_t root_len = strlen(root);
+    static char folders[ROMS_MAX_MATCHES][512];
+    SubtitleListItem items[ROMS_MAX_MATCHES];
+    for (int i = 0; i < count; i++) {
+        const char *path = matches->items[left[i]].rom_path;
+        const char *rel = strncmp(path, root, root_len) == 0 && path[root_len] == '/'
+                        ? path + root_len + 1 : path;
+        snprintf(folders[i], sizeof(folders[i]), "%.*s",
+                 (int)(FileName(rel) - rel > 0 ? FileName(rel) - rel - 1 : 0), rel);
+        items[i] = (SubtitleListItem){ .label = FileName(path), .subtitle = folders[i] };
+    }
+
+    ap_footer_item footer[] = {
+        { .button = AP_BTN_B, .label = "Back" },
+        { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
+    };
+    SubtitleListOpts opts = {
+        .title = "Which copy?",
+        .items = items,
+        .item_count = count,
+        .footer = footer,
+        .footer_count = sizeof(footer) / sizeof(footer[0]),
+        .secondary_action_button = AP_BTN_NONE,
+        .tertiary_action_button = AP_BTN_NONE,
+    };
+    ap_list_result result;
+    if (SubtitleList(&opts, &result) != AP_OK || result.action != AP_ACTION_SELECTED) return -1;
+    return left[result.selected_index];
+}
+
+/* For a console with no emulator installed: where to get one, on a line of
+   its own, or "" if there is nowhere. */
+static void PakStoreHint(int console_id, char *out, size_t out_size) {
+    const char *pak = Roms_PakStoreEmulator(console_id);
+    if (pak) snprintf(out, out_size, "\nTry downloading the \"%s\" Pak from the Pak Store.", pak);
+    else if (out_size) out[0] = '\0';
 }
 
 /* Finds the pick on the device and hands it straight to launch.sh, which
@@ -215,10 +280,11 @@ static int FindWorker(void *userdata) {
    fresh. */
 static void Play(int index, bool resume) {
     const Club_Pick *pick = &g_data.picks[index];
-    char message[512];
+    char message[640], hint[128];
 
     char label[24];
-    FindJob job = {
+    static FindJob job;
+    job = (FindJob){
         .game_id = Roms_GameIdFromUrl(pick->ra_url),
         .console_id = Roms_ConsoleFromTitle(pick->title, label, sizeof(label)),
         .title = pick->title,
@@ -234,6 +300,9 @@ static void Play(int index, bool resume) {
         InfoView(message);
         return;
     }
+    const char *console = Roms_ConsoleName(job.console_id);
+    if (!console) console = label;
+    PakStoreHint(job.console_id, hint, sizeof(hint));
 
     snprintf(message, sizeof(message), "Looking for %s...", pick->title);
     ap_process_opts opts = {
@@ -245,41 +314,60 @@ static void Play(int index, bool resume) {
     };
     ap_process_message(&opts, FindWorker, &job);
 
-    switch (job.result) {
-    case ROMS_FOUND:
+    /* Which copy, if any were found; the outcome below depends on its
+       emulator. */
+    const Roms_Match *match = NULL;
+    if (job.result == ROMS_FOUND) {
+        int chosen = ChooseMatch(&job.matches);
+        if (chosen < 0) return;
+        match = &job.matches.items[chosen];
+    }
+
+    switch (Decide_ForResult(job.result, job.console_id, match && match->emu_launch[0])) {
+    case DECIDE_LAUNCH:
         break;
-    case ROMS_CANCELLED:
+    case DECIDE_SILENT:
         return;
-    case ROMS_NOT_FOUND:
+    case DECIDE_NO_MATCH:
         snprintf(message, sizeof(message),
                  "None of your %s games is a copy of %s that RetroAchievements "
-                 "recognizes.", label, pick->title);
+                 "recognizes.", console, pick->title);
         InfoView(message);
         return;
-    case ROMS_NO_FOLDER:
-        snprintf(message, sizeof(message), "There is no %s folder in Roms on this device.", label);
+    case DECIDE_NO_GAMES:
+        snprintf(message, sizeof(message), "You don't have any %s games on this device yet.",
+                 console);
         InfoView(message);
         return;
-    case ROMS_NO_HASHES:
+    case DECIDE_MISSING_FOLDER:
+        snprintf(message, sizeof(message), "Couldn't find the \"%s\" folder in Roms.",
+                 Roms_NextUIFolder(job.console_id));
+        InfoView(message);
+        return;
+    case DECIDE_GET_EMULATOR:
+    case DECIDE_NO_FOLDER:
+        snprintf(message, sizeof(message), "There is no %s folder in Roms on this device.%s",
+                 console, hint);
+        InfoView(message);
+        return;
+    case DECIDE_CANT_PLAY:
+        snprintf(message, sizeof(message), "NextUI can't play %s games.", console);
+        InfoView(message);
+        return;
+    case DECIDE_NO_HASH_LIST:
         InfoView("Could not download RetroAchievements' list of known games. Connect "
                  "to Wi-Fi once and it will be saved for next time.");
         return;
-    case ROMS_UNKNOWN_CONSOLE:
-        return;
-    }
-
-    const char *file = strrchr(job.match.rom_path, '/');
-    file = file ? file + 1 : job.match.rom_path;
-    if (!job.match.emu_launch[0]) {
-        snprintf(message, sizeof(message),
-                 "Found %s, but no emulator for it is installed.", file);
+    case DECIDE_NO_EMULATOR:
+        snprintf(message, sizeof(message), "Found %s, but no emulator for it is installed.%s",
+                 FileName(match->rom_path), hint);
         InfoView(message);
         return;
     }
 
     int slot = LAUNCH_FRESH_SLOT;
     Launch_Resume state;
-    if (resume && Launch_FindResume(job.match.rom_path, &state)) slot = state.slot;
+    if (resume && Launch_FindResume(match->rom_path, &state)) slot = state.slot;
 
     /* Best effort: without it the app just reopens at the top. */
     FILE *selection = fopen(LAUNCH_SELECTION_FILE, "w");
@@ -288,7 +376,7 @@ static void Play(int index, bool resume) {
         fclose(selection);
     }
 
-    if (!Launch_HandOff(&job.match, slot)) {
+    if (!Launch_HandOff(match, slot)) {
         InfoView("Could not hand the game over to the launcher.");
         return;
     }

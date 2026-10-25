@@ -51,6 +51,12 @@ tasks:
     cmds:
       - ./{{.NATIVE_BUILD_DIR}}/scrape {{.FILE}}
 
+  test:
+    desc: Run the tests
+    deps: [build]
+    cmds:
+      - meson test -C {{.NATIVE_BUILD_DIR}} --print-errorlogs
+
   findrom:
     desc: Look for the current picks under $ROMS_PATH (ARGS="--hash <console> <file>" hashes one file)
     deps: [build]

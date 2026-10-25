@@ -9,6 +9,38 @@
 #include "launch.h"
 #include "paths.h"
 
+/* recent.txt holds paths relative to the SD card, as NextUI writes them. */
+static bool RecentPaths(const char *rom_path, const char **rel, char *file, size_t file_size) {
+    const char *sdcard = getenv("SDCARD_PATH");
+    const char *shared = getenv("SHARED_USERDATA_PATH");
+    if (!sdcard || !sdcard[0] || !shared || !shared[0]) return false;
+    size_t sd_len = strlen(sdcard);
+    if (strncmp(rom_path, sdcard, sd_len) != 0 || rom_path[sd_len] != '/') return false;
+    *rel = rom_path + sd_len;
+    snprintf(file, file_size, "%s/.minui/recent.txt", shared);
+    return true;
+}
+
+int Launch_RecentRank(const char *rom_path) {
+    const char *rel;
+    char path[600];
+    if (!RecentPaths(rom_path, &rel, path, sizeof(path))) return -1;
+
+    size_t len = 0;
+    char *text = Io_ReadFile(path, &len);
+    if (!text) return -1;
+    int rank = -1, line_no = 0;
+    size_t rel_len = strlen(rel);
+    for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n"), line_no++) {
+        if (strcspn(line, "\t") == rel_len && strncmp(line, rel, rel_len) == 0) {
+            rank = line_no;
+            break;
+        }
+    }
+    free(text);
+    return rank;
+}
+
 bool Launch_AddRecent(const char *rom_path) {
     const char *sdcard = getenv("SDCARD_PATH");
     const char *shared = getenv("SHARED_USERDATA_PATH");
