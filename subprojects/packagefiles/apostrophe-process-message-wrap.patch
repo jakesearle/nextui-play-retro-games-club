@@ -1,0 +1,41 @@
+--- a/include/apostrophe_widgets.h
++++ b/include/apostrophe_widgets.h
+@@ -2748,19 +2748,30 @@
+ 
+         int center_y = screen_h / 2;
+ 
+-        /* Static message */
+-        if (opts->message) {
+-            ap_draw_text_wrapped(msg_font, opts->message,
+-                AP_S(40), center_y - AP_S(60),
+-                screen_w - AP_S(80),
+-                theme->text, AP_ALIGN_CENTER);
+-        }
+-
+         /* Dynamic message */
+         int dyn_line_h = dyn_font ? TTF_FontHeight(dyn_font) : AP_S(16);
+         int dyn_lines = opts->dynamic_message ? (opts->message_lines > 0 ? opts->message_lines : 1) : 0;
+         int dyn_y = center_y - AP_S(20);
+ 
++        /* Static message. Its spot assumes one line; a message that wraps
++           is lifted so it ends above whatever is drawn under it (the
++           dynamic message, the progress bar or the spinner) instead of
++           running into it. */
++        if (opts->message) {
++            int msg_w = screen_w - AP_S(80);
++            int msg_y = center_y - AP_S(60);
++            int msg_h = ap_measure_wrapped_text_height(msg_font, opts->message, msg_w);
++            int below_y = dyn_lines > 0 ? dyn_y
++                        : (opts->show_progress && opts->progress) ? center_y + AP_S(30)
++                        : center_y + AP_S(20);
++            int pad = TTF_FontHeight(msg_font) / 3;
++            if (msg_y + msg_h + pad > below_y) msg_y = below_y - pad - msg_h;
++            if (msg_y < 0) msg_y = 0;
++            ap_draw_text_wrapped(msg_font, opts->message,
++                AP_S(40), msg_y, msg_w,
++                theme->text, AP_ALIGN_CENTER);
++        }
++
+         if (opts->dynamic_message && *opts->dynamic_message) {
+             ap_draw_text_wrapped(dyn_font, *opts->dynamic_message,
+                 AP_S(40), dyn_y,

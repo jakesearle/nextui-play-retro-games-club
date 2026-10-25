@@ -5,8 +5,9 @@ depth = 1
 
 patch_directory = apostrophe
 # Desktop-only drawing fix (the device draws corners from NextUI's sprites),
-# and X as an answer from ap_detail_screen, which only reports A, B and Y.
-diff_files = apostrophe-flush-rounded-corners.patch, apostrophe-detail-x-button.patch
+# X as an answer from ap_detail_screen, which only reports A, B and Y, and
+# ap_process_message keeping a wrapped message clear of its progress bar.
+diff_files = apostrophe-flush-rounded-corners.patch, apostrophe-detail-x-button.patch, apostrophe-process-message-wrap.patch
 
 [provide]
 apostrophe = apostrophe_dep

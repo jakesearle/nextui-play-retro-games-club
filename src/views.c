@@ -304,7 +304,14 @@ static void Play(int index, bool resume) {
     if (!console) console = label;
     PakStoreHint(job.console_id, hint, sizeof(hint));
 
-    snprintf(message, sizeof(message), "Looking for %s...", pick->title);
+    /* The console is implied by the screen it was picked from. */
+    char name[sizeof(pick->title)];
+    snprintf(name, sizeof(name), "%s", pick->title);
+    char *label_open = strrchr(name, '(');
+    if (label_open && label_open > name && label_open[-1] == ' ' && strchr(label_open, ')')) {
+        label_open[-1] = '\0';
+    }
+    snprintf(message, sizeof(message), "Looking for %s...", name);
     ap_process_opts opts = {
         .message = message,
         .show_progress = true,
