@@ -1,0 +1,23 @@
+--- a/include/apostrophe_widgets.h
++++ b/include/apostrophe_widgets.h
+@@ -291,7 +291,8 @@
+ typedef enum {
+     AP_DETAIL_BACK = 0,
+     AP_DETAIL_ACTION,
+-    AP_DETAIL_SECONDARY_ACTION
++    AP_DETAIL_SECONDARY_ACTION,
++    AP_DETAIL_TERTIARY_ACTION   /* X */
+ } ap_detail_action;
+ 
+ typedef struct {
+@@ -2989,6 +2990,10 @@
+                     result->action = AP_DETAIL_SECONDARY_ACTION;
+                     running = false;
+                     break;
++                case AP_BTN_X:
++                    result->action = AP_DETAIL_TERTIARY_ACTION;
++                    running = false;
++                    break;
+                 default:
+                     break;
+             }

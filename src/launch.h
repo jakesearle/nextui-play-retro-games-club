@@ -19,12 +19,10 @@
    so the game boots from the start. */
 #define LAUNCH_FRESH_SLOT 8
 
-/* The save state NextUI's menu would offer to resume (its X button): the
-   last slot the player used for this ROM, and the screenshot minarch keeps
-   beside it. */
+/* The save state NextUI's menu would resume (its X button): the last slot
+   the player used for this ROM. */
 typedef struct {
     int slot;
-    char preview[1024]; /* empty when there is none */
 } Launch_Resume;
 
 /* Whether the ROM has a save state to resume, read from where minarch

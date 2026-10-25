@@ -86,8 +86,6 @@ bool Launch_FindResume(const char *rom_path, Launch_Resume *resume) {
     if (!ok) return false;
 
     resume->slot = (int)slot;
-    snprintf(path, sizeof(path), "%s/.minui/%s/%s.%d.bmp", shared, tag, file, resume->slot);
-    if (Io_FileAge(path) >= 0) snprintf(resume->preview, sizeof(resume->preview), "%s", path);
     return true;
 }
 

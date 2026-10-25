@@ -17,8 +17,14 @@ for NextUI, following the layout of
 | Current picks | One row per current game, with its event underneath, and Refresh at the bottom |
 | Game details | Box art, event dates, rating, beaten/mastered/completed counts, time to beat, description, links |
 
-**A** opens a game's details, **X** on the main list or **A** on the details
-screen plays it, **B** goes back (or quits from the main list).
+| Screen | B | X | A |
+|---|---|---|---|
+| Current picks | Quit | Resume the game | Details |
+| Game details | Back | Resume the game | Play from the start |
+
+Resume loads the last save state you used for that game, as NextUI's own
+X does; a game with no save state just starts. Neither asks first: when the
+game is closed you are back in the Pak, on the same pick.
 
 ## Playing a pick
 
@@ -37,12 +43,10 @@ does not:
    [rcheevos](https://github.com/RetroAchievements/rcheevos) at the exact
    version NextUI's own RA support uses. Hashes are cached by path, size and
    modified time, so only new ROMs are ever read again.
-4. If the game has a save state, the Pak offers to resume it, as NextUI's
-   menu does with X: the last slot used, read from
-   `.userdata/shared/.minui/<TAG>/<rom>.txt`, shown with minarch's
-   screenshot of it. **A** resumes, **X** starts over (slot 8, NextUI's
-   fresh start), **B** cancels. Without a save state it just asks to play.
-5. On a match it confirms the file, adds it to Recently Played, writes the
+4. Resume reads the last save slot you used for the ROM from where minarch
+   records it, `.userdata/shared/.minui/<TAG>/<rom>.txt`; Play, or a game
+   with no save, asks minarch for slot 8, its fresh start.
+5. On a match it adds the game to Recently Played, writes the
    emulator and ROM to `/tmp/prgc-tracker-launch` and exits. `launch.sh` then
    starts the game the way NextUI's menu would: Game Time tracking, and the `pre-launch.d` and
    `post-launch.d` hooks with NextUI's `HOOK_*` variables. NextUI offers paks

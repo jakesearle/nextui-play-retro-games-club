@@ -4,7 +4,6 @@
 #include "apostrophe.h"
 #include "apostrophe_widgets.h"
 
-#include "choice.h"
 #include "club.h"
 #include "launch.h"
 #include "roms.h"
@@ -158,9 +157,12 @@ static int FindWorker(void *userdata) {
     return 0;
 }
 
-/* Finds the pick on the device and, once the player confirms the file it
-   found, hands it to launch.sh. */
-static void Play(int index) {
+/* Finds the pick on the device and hands it straight to launch.sh, which
+   brings the player back here when the game closes. With resume set, the
+   game loads the last save state the player used for it, as NextUI's
+   menu does with X; a game without one just starts. Otherwise it starts
+   fresh. */
+static void Play(int index, bool resume) {
     const Club_Pick *pick = &g_data.picks[index];
     char message[512];
 
@@ -224,39 +226,9 @@ static void Play(int index) {
         return;
     }
 
-    /* As NextUI's menu does: with a save state, resuming it is the default
-       and starting over the alternative; without one, a plain Play. */
     int slot = LAUNCH_FRESH_SLOT;
-    Launch_Resume resume;
-    if (Launch_FindResume(job.match.rom_path, &resume)) {
-        snprintf(message, sizeof(message), "Resume %s from save slot %d?", file, resume.slot + 1);
-        ap_footer_item footer[] = {
-            { .button = AP_BTN_B, .label = "Cancel" },
-            { .button = AP_BTN_X, .label = "Start Over" },
-            { .button = AP_BTN_A, .label = "Resume", .is_confirm = true },
-        };
-        ChoiceOpts choice = {
-            .message = message,
-            .image_path = resume.preview[0] ? resume.preview : NULL,
-            .footer = footer,
-            .footer_count = sizeof(footer) / sizeof(footer[0]),
-        };
-        ap_button answer = Choice(&choice);
-        if (answer == AP_BTN_B) return;
-        if (answer == AP_BTN_A) slot = resume.slot;
-    } else {
-        snprintf(message, sizeof(message), "Play %s?", file);
-        ap_footer_item footer[] = {
-            { .button = AP_BTN_B, .label = "Cancel" },
-            { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
-        };
-        ChoiceOpts choice = {
-            .message = message,
-            .footer = footer,
-            .footer_count = sizeof(footer) / sizeof(footer[0]),
-        };
-        if (Choice(&choice) != AP_BTN_A) return;
-    }
+    Launch_Resume state;
+    if (resume && Launch_FindResume(job.match.rom_path, &state)) slot = state.slot;
 
     /* Best effort: without it the app just reopens at the top. */
     FILE *selection = fopen(LAUNCH_SELECTION_FILE, "w");
@@ -320,6 +292,7 @@ static void PickView(int index) {
 
     ap_footer_item footer[] = {
         { .button = AP_BTN_B, .label = "Back" },
+        { .button = AP_BTN_X, .label = "Resume" },
         { .button = AP_BTN_A, .label = "Play", .is_confirm = true },
     };
 
@@ -332,13 +305,16 @@ static void PickView(int index) {
         .show_section_separator = true,
     };
 
-    /* A plays; coming back from a search that found nothing reopens the
-       screen, which the widget cannot do without starting at the top. */
+    /* A plays from the start, X resumes. Coming back from a search that
+       found nothing reopens the screen, which the widget cannot do without
+       starting at the top. (X needs the patch in subprojects/packagefiles:
+       stock ap_detail_screen only reports A, B and Y.) */
     while (!g_launching) {
         ap_detail_result result;
         ap_detail_screen(&opts, &result);
-        if (result.action != AP_DETAIL_ACTION) break;
-        Play(index);
+        if (result.action == AP_DETAIL_ACTION) Play(index, false);
+        else if (result.action == AP_DETAIL_TERTIARY_ACTION) Play(index, true);
+        else break;
     }
 }
 
@@ -386,7 +362,7 @@ void MainView(bool returning) {
 
         ap_footer_item footer[] = {
             { .button = AP_BTN_B, .label = "Quit" },
-            { .button = AP_BTN_X, .label = "Play" },
+            { .button = AP_BTN_X, .label = "Resume" },
             { .button = AP_BTN_A, .label = "Details", .is_confirm = true },
         };
 
@@ -409,7 +385,7 @@ void MainView(bool returning) {
 
         bool on_pick = result.selected_index != refresh_index;
         if (result.action == AP_ACTION_TERTIARY_TRIGGERED) {
-            if (on_pick) Play(result.selected_index);
+            if (on_pick) Play(result.selected_index, true);
         } else if (result.action == AP_ACTION_SELECTED) {
             if (on_pick) PickView(result.selected_index);
             else Load(0);
