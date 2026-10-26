@@ -2,7 +2,7 @@
   "name": "PRGC Tracker",
   "version": "v1.0.0",
   "type": "TOOL",
-  "description": "See what the Play Retro Games Club is playing: Game of the Week, Month, Season, Romhack and specials.",
+  "description": "See what the Play Retro Games Club is playing and jump straight into it with your own ROMs.",
   "author": "jakesearle",
   "repo_url": "https://github.com/jakesearle/nextui-play-retro-games-club",
   "release_filename": "PRGC.Tracker.pak.zip",
