@@ -19,6 +19,8 @@ club lists for it.
 
 Not affiliated with Joey’s Retro Handhelds, the Play Retro Games Club or RetroAchievements.
 
+This is a community Pak, not part of NextUI. Please report problems in this repo's [issues](https://github.com/jakesearle/nextui-play-retro-games-club/issues), not to the NextUI team.
+
 ## What you need
 
 - Wi-Fi, to load the club's current games. After the first load, the Pak
