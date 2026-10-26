@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
     }
 
     static Club_Data data;
-    if (Club_Load(&data, 60 * 60) != CLUB_OK) {
+    if (Club_Load(&data, CLUB_LOAD_AUTO) != CLUB_OK) {
         fprintf(stderr, "could not load the club page\n");
         return 1;
     }

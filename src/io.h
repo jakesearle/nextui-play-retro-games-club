@@ -15,6 +15,13 @@ typedef struct {
    error page is never mistaken for content. Blocking. */
 bool Io_HttpGet(const char *url, Io_Buffer *buffer);
 
+/* Io_HttpGet, asking the server for the page only if it changed since the
+   version tagged etag (NULL or "" to always get it). On "not modified"
+   returns true with *not_modified set and buffer empty. The response's own
+   ETag, if any, goes to etag_out. */
+bool Io_HttpGetIfChanged(const char *url, const char *etag, Io_Buffer *buffer,
+                         char *etag_out, size_t etag_size, bool *not_modified);
+
 /* Writes via a temporary file, so a failed write never replaces a good copy. */
 bool Io_WriteFileAtomic(const char *path, const char *data, size_t len);
 

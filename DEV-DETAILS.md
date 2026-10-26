@@ -7,7 +7,8 @@ it does and how to build it, see the [README](./README.md).
 
 | Screen | Contents |
 |---|---|
-| Current picks | One row per current game, with its event underneath, and Refresh at the bottom |
+| Current picks | One row per current game, with its event underneath, and Settings at the bottom |
+| Settings | **Refresh games** (always asks the site) and **Unlink ROM files** (forgets every saved game-to-ROM link) |
 | Game details | Box art, event dates, rating, beaten and 100% counts, time to beat, links as QR codes, description |
 
 | Screen | B | X | A |
@@ -27,7 +28,10 @@ game, so a misnamed file still matches and a different dump of the right game
 does not:
 
 1. The pick's RetroAchievements link gives its game id, and the label at the
-   end of its title ("(SNES)") gives the console.
+   end of its title ("(SNES)") gives the console. If a ROM was launched for
+   that game before, `links.tsv` names it with its size and modified time;
+   while the file is still there unchanged, the Pak goes straight to it and
+   skips the steps below (no search, no hash list, so it works offline).
 2. The Pak downloads RA's list of every known ROM hash for that console
    (`dorequest.php?r=hashlibrary`, no account needed) and keeps it for three
    days.
@@ -52,8 +56,8 @@ does not:
    no way to launch a ROM themselves: hooks only observe, and `/tmp/next` is
    deleted as soon as a pak exits.
 7. When the game is closed, `launch.sh` opens the Pak again on the game you
-   played, reusing the page it fetched before (if under 15 minutes old)
-   instead of downloading it again. Quitting the Pak returns to NextUI.
+   played, from the saved page while it is still fresh (see below). Quitting
+   the Pak returns to NextUI.
 
 For a console with an emulator in the Pak Store for this device (Nintendo 64,
 Dreamcast, PPSSPP on TrimUI) but none installed, the Pak says which one to
@@ -65,8 +69,24 @@ need their standard MAME/FBNeo names.
 `task findrom` runs the same search without the UI against `$ROMS_PATH`, and
 `task findrom ARGS="--hash <console id> <file>"` prints one file's RA hash.
 
-Without a connection the Pak shows the last page it fetched and marks every
-title with how old it is.
+## When the club page is downloaded
+
+The page is saved as `club.html`, with `club.meta` beside it recording when
+the site last confirmed it and its ETag. On launch the saved page is used
+as is, with no network at all, while it is both:
+
+- under 6 hours old, so member counts stay current, and
+- before the club's next change, as the page announces it: the earliest of
+  the countdown's `data-target`, any date in a pick's "next" line ("New week
+  starts November 1, 2026"), and the 1st of next month.
+
+Otherwise, and always on **Refresh**, the Pak asks the site with the saved
+page's ETag: an unchanged page comes back as a tiny "not modified" and the
+saved copy is restamped. A device clock that reads earlier than the last
+fetch is not trusted. Without a connection the Pak shows the saved page and
+marks every title with how old it is. Timed-out requests are retried once
+(Wi-Fi is often still waking), with 10 seconds to connect, and the log
+records which step failed.
 
 ## How it gets the data
 
@@ -98,8 +118,9 @@ CPU governor. Nothing touches the network or needs a real ROM.
 
 | Suite | Covers |
 |---|---|
-| `tests/test_roms.c` | Pick → console and game id; hashing as minarch does (zips, copier and iNES headers, arcade by name); every search result: no folder, empty folders, no match, offline, found with its emulator, duplicates and variants, all of a console's folders, deep subfolders, `.bin` tracks owned by a `.cue`, CD games in the cartridge folder, the hash cache |
+| `tests/test_roms.c` | Saved game-to-ROM links (reused offline, dropped when the file changes or moves); pick → console and game id; hashing as minarch does (zips, copier and iNES headers, arcade by name); every search result: no folder, empty folders, no match, offline, found with its emulator, duplicates and variants, all of a console's folders, deep subfolders, `.bin` tracks owned by a `.cue`, CD games in the cartridge folder, the hash cache |
 | `tests/test_decide.c` | Which copy to play (save state, then Recently Played, then ask) and what each result tells the player (missing NextUI folder, Pak Store emulator, can't play), per device |
+| `tests/test_club.c` | When the saved club page is trusted: the next change from the countdown, "next" lines and month ends; the 6-hour cap; clocks earlier than the fetch; no network when fresh, the offline fallback, and Refresh always asking |
 | `tests/test_launch.c` | Resume slots, Recently Played (order, aliases, the 24-entry cap) and the hand-off file |
 | `tests/test_launch_sh.sh` | `launch.sh`: the app → game → app loop, slot fallback, missing ROMs, hooks, the governor, paths with quotes |
 

@@ -31,7 +31,8 @@ int Launch_RecentRank(const char *rom_path) {
     if (!text) return -1;
     int rank = -1, line_no = 0;
     size_t rel_len = strlen(rel);
-    for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n"), line_no++) {
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save), line_no++) {
         if (strcspn(line, "\t") == rel_len && strncmp(line, rel, rel_len) == 0) {
             rank = line_no;
             break;

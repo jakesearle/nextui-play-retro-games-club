@@ -148,8 +148,8 @@ static void FormatEvent(const char *event, char *out, size_t out_size) {
 /* Runs on ap_process_message's worker thread: network and files only, no
    SDL. Box art is fetched here too, so opening a pick never waits. */
 static int LoadWorker(void *userdata) {
-    long reuse_seconds = *(const long *)userdata;
-    g_result = Club_Load(&g_data, reuse_seconds);
+    Club_LoadMode mode = *(const Club_LoadMode *)userdata;
+    g_result = Club_Load(&g_data, mode);
     if (g_result != CLUB_OK) return 0;
 
     for (int i = 0; i < g_data.pick_count; i++) {
@@ -160,16 +160,16 @@ static int LoadWorker(void *userdata) {
     return 0;
 }
 
-/* Loads the page, explaining any failure. A saved copy younger than
-   reuse_seconds is used as is. Returns whether there is data to show; on
-   failure any data from an earlier load is left in place. */
-static bool Load(long reuse_seconds) {
+/* Loads the picks, explaining any failure (club.c decides when the saved
+   page will do). Returns whether there is data to show; on failure any
+   data from an earlier load is left in place. */
+static bool Load(Club_LoadMode mode) {
     static Club_Data previous;
     previous = g_data;
 
     /* Three periods, not U+2026: NextUI's font draws that glyph raised. */
     ap_process_opts opts = { .message = "Loading..." };
-    ap_process_message(&opts, LoadWorker, &reuse_seconds);
+    ap_process_message(&opts, LoadWorker, &mode);
 
     switch (g_result) {
     case CLUB_OK:
@@ -313,23 +313,31 @@ static void Play(int index, bool resume) {
     if (label_open && label_open > name && label_open[-1] == ' ' && strchr(label_open, ')')) {
         label_open[-1] = '\0';
     }
-    snprintf(message, sizeof(message), "Looking for %s...", name);
-    ap_process_opts opts = {
-        .message = message,
-        .show_progress = true,
-        .progress = &job.progress,
-        .interrupt_signal = &job.cancel,
-        .interrupt_button = AP_BTN_B,
-    };
-    ap_process_message(&opts, FindWorker, &job);
-
-    /* Which copy, if any were found; the outcome below depends on its
-       emulator. */
+    /* A game launched before goes straight to the same file, if it is
+       still there unchanged: no search, and no network. */
+    static Roms_Match linked;
     const Roms_Match *match = NULL;
-    if (job.result == ROMS_FOUND) {
-        int chosen = ChooseMatch(&job.matches);
-        if (chosen < 0) return;
-        match = &job.matches.items[chosen];
+    if (Roms_FindLinked(job.game_id, &linked)) {
+        job.result = ROMS_FOUND;
+        match = &linked;
+    } else {
+        snprintf(message, sizeof(message), "Looking for %s...", name);
+        ap_process_opts opts = {
+            .message = message,
+            .show_progress = true,
+            .progress = &job.progress,
+            .interrupt_signal = &job.cancel,
+            .interrupt_button = AP_BTN_B,
+        };
+        ap_process_message(&opts, FindWorker, &job);
+
+        /* Which copy, if any were found; the outcome below depends on its
+           emulator. */
+        if (job.result == ROMS_FOUND) {
+            int chosen = ChooseMatch(&job.matches);
+            if (chosen < 0) return;
+            match = &job.matches.items[chosen];
+        }
     }
 
     switch (Decide_ForResult(job.result, job.console_id, match && match->emu_launch[0])) {
@@ -388,6 +396,10 @@ static void Play(int index, bool resume) {
     if (!Launch_HandOff(match, slot)) {
         InfoView("Could not hand the game over to the launcher.");
         return;
+    }
+    /* Not fatal: without it the next Play just searches again. */
+    if (!Roms_SaveLink(job.game_id, match->rom_path)) {
+        fprintf(stderr, "could not save the link for game %d\n", job.game_id);
     }
     g_launching = true;
 }
@@ -560,14 +572,86 @@ static int ReturningCursor(void) {
     return 0;
 }
 
+/* The Pak's own housekeeping, off the main list. */
+static void SettingsView(void) {
+    enum { SETTING_REFRESH, SETTING_UNLINK };
+    SubtitleListItem items[] = {
+        [SETTING_REFRESH] = { .label = "Refresh games" },
+        [SETTING_UNLINK] = { .label = "Unlink ROM files" },
+    };
+    ap_footer_item footer[] = {
+        { .button = AP_BTN_B, .label = "Back" },
+        { .button = AP_BTN_A, .label = "Select", .is_confirm = true },
+    };
+
+    int cursor = 0, scroll = 0;
+    for (;;) {
+        SubtitleListOpts opts = {
+            .title = "Settings",
+            .items = items,
+            .item_count = sizeof(items) / sizeof(items[0]),
+            .footer = footer,
+            .footer_count = sizeof(footer) / sizeof(footer[0]),
+            .secondary_action_button = AP_BTN_NONE,
+            .tertiary_action_button = AP_BTN_NONE,
+            .initial_index = cursor,
+            .visible_start_index = scroll,
+        };
+        ap_list_result result;
+        if (SubtitleList(&opts, &result) != AP_OK) return;
+        cursor = result.selected_index;
+        scroll = result.visible_start_index;
+
+        if (result.selected_index == SETTING_REFRESH) {
+            /* Back to the list, which is what a refresh is for. */
+            if (Load(CLUB_LOAD_CHECK)) return;
+        } else if (result.selected_index == SETTING_UNLINK) {
+            if (Roms_LinkCount() == 0) {
+                InfoView("No ROM files are linked yet.");
+                continue;
+            }
+            /* The explanation lives here rather than under the row, where
+               the list has room for one line only, and it doubles as a
+               check before undoing every choice of copy. */
+            ap_footer_item confirm_footer[] = {
+                { .button = AP_BTN_B, .label = "Cancel" },
+                { .button = AP_BTN_A, .label = "Unlink", .is_confirm = true },
+            };
+            ap_message_opts confirm = {
+                .message = "Unlink ROM files?\n\nHelpful if you've added another ROM with a "
+                           "supported hash. Each game will be searched for again the next "
+                           "time you play it.",
+                .footer = confirm_footer,
+                .footer_count = sizeof(confirm_footer) / sizeof(confirm_footer[0]),
+            };
+            ap_confirm_result answer;
+            ap_confirmation(&confirm, &answer);
+            if (!answer.confirmed) continue;
+
+            int unlinked = Roms_ClearLinks();
+            char message[256];
+            if (unlinked < 0) {
+                snprintf(message, sizeof(message), "Could not unlink the ROM files.");
+            } else if (unlinked == 0) {
+                snprintf(message, sizeof(message), "No ROM files are linked yet.");
+            } else {
+                snprintf(message, sizeof(message),
+                         "Unlinked %d game%s. Each will be searched for again the next time "
+                         "you play it.", unlinked, unlinked == 1 ? "" : "s");
+            }
+            InfoView(message);
+        }
+    }
+}
+
 void MainView(bool returning) {
-    /* Coming back from a game, the page fetched just before it is still
-       good, so the list reappears without a network round trip. */
-    if (!Load(returning ? 15L * 60 : 0)) return;
+    /* The saved page is used while it is fresh, which also makes coming
+       back from a game instant. */
+    if (!Load(CLUB_LOAD_AUTO)) return;
     int cursor = returning ? ReturningCursor() : 0, scroll = 0;
 
     for (;;) {
-        /* Rebuilt each pass, since Refresh can replace the data underneath. */
+        /* Rebuilt each pass, since a refresh can replace the data underneath. */
         SubtitleListItem items[CLUB_MAX_PICKS + 1];
         static char events[CLUB_MAX_PICKS][128];
         int count = 0;
@@ -579,8 +663,8 @@ void MainView(bool returning) {
                 .subtitle = events[i],
             };
         }
-        int refresh_index = count;
-        items[count++] = (SubtitleListItem){ .label = "Refresh" };
+        int settings_index = count;
+        items[count++] = (SubtitleListItem){ .label = "Settings" };
 
         char title[SCREEN_TITLE_MAX];
         FormatTitle(SCREEN_TITLE, title, sizeof(title));
@@ -608,12 +692,12 @@ void MainView(bool returning) {
         cursor = result.selected_index;
         scroll = result.visible_start_index;
 
-        bool on_pick = result.selected_index != refresh_index;
+        bool on_pick = result.selected_index != settings_index;
         if (result.action == AP_ACTION_TERTIARY_TRIGGERED) {
             if (on_pick) Play(result.selected_index, true);
         } else if (result.action == AP_ACTION_SELECTED) {
             if (on_pick) PickView(result.selected_index);
-            else Load(0);
+            else SettingsView();
         }
         if (g_launching) break;
     }

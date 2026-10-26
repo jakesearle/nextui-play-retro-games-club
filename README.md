@@ -47,6 +47,7 @@ The steps go as follows (we'll use Galaga (NES) as an example):
   - If some of them have save states, only those are considered
   - Of those, the one you played most recently (in "Recently Played") is launched
   - If none of them has been played, the Pak will ask which one you'd like to play
+- Once a game has launched, the Pak remembers which file it used and goes straight to it next time, with no search (even offline). If that file is moved, deleted or changed, it searches again. If you add another copy you'd rather play, **Settings → Unlink ROM files** makes it search again too (it asks first).
 
 ## Coding Stuff
 

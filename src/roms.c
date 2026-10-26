@@ -743,3 +743,99 @@ Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Match
     if (progress) *progress = 1.0f;
     return result;
 }
+
+/* ── Links ───────────────────────────────────────────────────────────────── */
+
+/* links.tsv: one "<game id>\t<size>\t<mtime>\t<path>" line per RA game,
+   for the ROM last launched for it. */
+static bool LinksPath(char *out, size_t out_size) {
+    char dir[400];
+    if (!Paths_UserData(dir, sizeof(dir), NULL) || !Paths_MakeDirs(dir)) return false;
+    int written = snprintf(out, out_size, "%s/links.tsv", dir);
+    return written > 0 && (size_t)written < out_size;
+}
+
+bool Roms_FindLinked(int game_id, Roms_Match *match) {
+    memset(match, 0, sizeof(*match));
+    char path[512];
+    if (game_id <= 0 || !LinksPath(path, sizeof(path))) return false;
+    size_t len = 0;
+    char *text = Io_ReadFile(path, &len);
+    if (!text) return false;
+
+    bool found = false;
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line && !found; line = strtok_r(NULL, "\n", &save)) {
+        int id;
+        long long size, mtime;
+        int consumed = 0;
+        if (sscanf(line, "%d\t%lld\t%lld\t%n", &id, &size, &mtime, &consumed) != 3 || id != game_id ||
+            consumed <= 0) {
+            continue;
+        }
+        const char *rom = line + consumed;
+        struct stat info;
+        char tag[32];
+        /* Still a file, unchanged, and still in a Roms folder NextUI knows. */
+        if (stat(rom, &info) != 0 || !S_ISREG(info.st_mode) || (long long)info.st_size != size ||
+            (long long)info.st_mtime != mtime || !Roms_TagForPath(rom, tag, sizeof(tag))) {
+            break;
+        }
+        snprintf(match->rom_path, sizeof(match->rom_path), "%s", rom);
+        FindEmulator(tag, match->emu_launch, sizeof(match->emu_launch));
+        found = true;
+    }
+    free(text);
+    return found;
+}
+
+bool Roms_SaveLink(int game_id, const char *rom_path) {
+    char path[512];
+    struct stat info;
+    if (game_id <= 0 || !LinksPath(path, sizeof(path)) || stat(rom_path, &info) != 0 ||
+        strchr(rom_path, '\n') || strchr(rom_path, '\t')) {
+        return false;
+    }
+
+    /* Every other game's link, then this one. */
+    size_t len = 0;
+    char *old = Io_ReadFile(path, &len);
+    size_t cap = len + strlen(rom_path) + 64;
+    char *out = malloc(cap);
+    if (!out) { free(old); return false; }
+    size_t out_len = 0;
+    if (old) {
+        char *save = NULL;
+        for (char *line = strtok_r(old, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+            if (atoi(line) == game_id) continue;
+            out_len += (size_t)snprintf(out + out_len, cap - out_len, "%s\n", line);
+        }
+    }
+    out_len += (size_t)snprintf(out + out_len, cap - out_len, "%d\t%lld\t%lld\t%s\n", game_id,
+                                (long long)info.st_size, (long long)info.st_mtime, rom_path);
+    bool ok = Io_WriteFileAtomic(path, out, out_len);
+    free(out);
+    free(old);
+    return ok;
+}
+
+int Roms_LinkCount(void) {
+    char path[512];
+    if (!LinksPath(path, sizeof(path))) return 0;
+    size_t len = 0;
+    char *text = Io_ReadFile(path, &len);
+    if (!text) return 0;
+    int count = 0;
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) count += atoi(line) > 0;
+    free(text);
+    return count;
+}
+
+int Roms_ClearLinks(void) {
+    char path[512];
+    if (!LinksPath(path, sizeof(path))) return -1;
+    int count = Roms_LinkCount();
+    if (Io_FileAge(path) < 0) return 0; /* nothing linked yet */
+    return remove(path) == 0 ? count : -1;
+}

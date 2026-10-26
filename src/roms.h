@@ -68,6 +68,24 @@ int Roms_GameIdFromUrl(const char *url);
 Roms_Result Roms_Find(int game_id, int console_id, const char *title, Roms_Matches *matches,
                       float *progress, const int *cancel);
 
+/* The ROM last launched for an RA game, if it is still there unchanged:
+   no search, no hash list, so this works offline. Fills match (with the
+   emulator as NextUI would pick it today) and returns true; returns false
+   if there is no link or the file was moved, deleted or changed. */
+bool Roms_FindLinked(int game_id, Roms_Match *match);
+
+/* Remembers rom_path as the ROM for an RA game, with its size and modified
+   time, replacing any earlier link for the game. */
+bool Roms_SaveLink(int game_id, const char *rom_path);
+
+/* How many games have a saved link. */
+int Roms_LinkCount(void);
+
+/* Forgets every saved link, so each game is searched for again next time
+   it is played: the way to pick up a copy added since. Returns how many
+   games were linked, or -1 if the links could not be removed. */
+int Roms_ClearLinks(void);
+
 /* One ROM's RA hash, as minarch computes it: zipped cartridge ROMs are
    hashed by the file inside. */
 bool Roms_HashFile(int console_id, const char *path, char hash[33]);

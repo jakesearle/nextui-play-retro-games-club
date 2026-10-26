@@ -57,7 +57,7 @@ if not meson.is_cross_build()
 
   # `task test`: the rules behind Play, against fixture SD cards and hash
   # lists, with no network and no real ROMs.
-  foreach name : ['roms', 'decide', 'launch']
+  foreach name : ['roms', 'decide', 'launch', 'club']
     test(name, executable('test_' + name,
       files('tests/test_' + name + '.c', 'src/launch.c') + club_sources,
       include_directories: [inc_dir, include_directories('tests')],

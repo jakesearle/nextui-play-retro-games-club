@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
         result = Club_Parse(html, len, &data);
         free(html);
     } else {
-        result = Club_Load(&data, 0);
+        result = Club_Load(&data, CLUB_LOAD_CHECK);
     }
 
     printf("result=%d picks=%d from_cache=%d age=%lds\n",

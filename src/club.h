@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <time.h>
 
 /* The Play Retro Games Club page, scraped. There is no API: the page is
    server-rendered WordPress, and its jrh-* class names are the contract. If
@@ -45,10 +46,31 @@ typedef enum {
     CLUB_ERROR_PARSE,   /* Fetched, but no picks found: the page changed */
 } Club_Result;
 
-/* Fetches the page, falling back to the last saved copy when offline. A
-   saved copy younger than reuse_seconds is used without asking the network
-   at all (0 always fetches). Blocking; call it from a worker. */
-Club_Result Club_Load(Club_Data *data, long reuse_seconds);
+/* A saved page is trusted without asking the site until the club's next
+   change, and at most this long, so member counts stay current. */
+#define CLUB_MAX_CACHE_AGE_SECONDS (6L * 60 * 60)
+
+typedef enum {
+    CLUB_LOAD_AUTO,  /* the saved page if still fresh, else ask the site */
+    CLUB_LOAD_CHECK, /* always ask the site (Refresh) */
+} Club_LoadMode;
+
+/* Loads the club's picks: from the saved page while it is fresh, else from
+   the site, asking with the saved page's ETag so an unchanged page costs a
+   tiny "not modified" reply. Falls back to the saved page when offline.
+   Blocking; call it from a worker. */
+Club_Result Club_Load(Club_Data *data, Club_LoadMode mode);
+
+/* When the club's page next changes, as the page itself announces it: the
+   earliest of its countdown, any date in a pick's "next" line ("New week
+   starts November 1, 2026"), and the first of the month after fetched.
+   Only times after fetched count. */
+time_t Club_NextChange(const char *html, size_t len, time_t fetched);
+
+/* Whether a page fetched at `fetched` can still be used at `now` without
+   asking the site. A clock that reads earlier than the fetch is not
+   trusted. */
+bool Club_CacheIsFresh(time_t now, time_t fetched, time_t next_change);
 
 /* Parses page HTML into data. Exposed so the parser can be tested against a
    saved page without the network. */

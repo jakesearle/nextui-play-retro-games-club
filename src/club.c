@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "club.h"
 #include "html.h"
@@ -111,38 +112,186 @@ Club_Result Club_Parse(const char *html, size_t len, Club_Data *data) {
     return data->pick_count > 0 ? CLUB_OK : CLUB_ERROR_PARSE;
 }
 
-/* ── Cache ───────────────────────────────────────────────────────────────── */
+/* ── When the page changes ────────────────────────────────────────────── */
 
-static bool CachePath(char *out, size_t out_size) {
-    char dir[400];
-    if (!Paths_UserData(dir, sizeof(dir), NULL) || !Paths_MakeDirs(dir)) return false;
-    int written = snprintf(out, out_size, "%s/club.html", dir);
-    return written > 0 && (size_t)written < out_size;
+static const char *const k_months[] = {
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+};
+
+/* "2026-10-29T00:00:00+00:00", the countdown's data-target. */
+static bool ParseIsoTime(const char *s, time_t *out) {
+    int y, mo, d, h, mi, sec, off_h = 0, off_m = 0;
+    char sign = '+';
+    if (sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &sec) != 6) return false;
+    const char *tz = s + 19;
+    if (*tz == '+' || *tz == '-') {
+        sign = *tz;
+        if (sscanf(tz + 1, "%2d:%2d", &off_h, &off_m) != 2) return false;
+    } else if (*tz != 'Z' && *tz != '\0') {
+        return false;
+    }
+    struct tm tm = { .tm_year = y - 1900, .tm_mon = mo - 1, .tm_mday = d,
+                     .tm_hour = h, .tm_min = mi, .tm_sec = sec };
+    time_t t = timegm(&tm);
+    long offset = (off_h * 60L + off_m) * 60L;
+    *out = sign == '+' ? t - offset : t + offset;
+    return true;
 }
 
-Club_Result Club_Load(Club_Data *data, long reuse_seconds) {
-    char cache_path[512];
-    bool have_cache_path = CachePath(cache_path, sizeof(cache_path));
+/* The first "<Month> <day>, <year>" in s, as midnight UTC: the club's
+   countdown runs on UTC midnights. */
+static bool ParseDayInText(const char *s, time_t *out) {
+    for (size_t m = 0; m < sizeof(k_months) / sizeof(k_months[0]); m++) {
+        const char *at = strstr(s, k_months[m]);
+        int day, year;
+        if (!at || sscanf(at + strlen(k_months[m]), " %d, %d", &day, &year) != 2) continue;
+        struct tm tm = { .tm_year = year - 1900, .tm_mon = (int)m, .tm_mday = day };
+        *out = timegm(&tm);
+        return true;
+    }
+    return false;
+}
 
-    long age = have_cache_path ? Io_FileAge(cache_path) : -1;
-    if (age >= 0 && age < reuse_seconds) {
+static void Earliest(time_t *best, time_t candidate, time_t after) {
+    if (candidate > after && (*best == 0 || candidate < *best)) *best = candidate;
+}
+
+time_t Club_NextChange(const char *html, size_t len, time_t fetched) {
+    Html_Span page = { html, html + len };
+    time_t next = 0;
+
+    Html_Span countdown;
+    char target[64];
+    time_t t;
+    if (Html_FindClass(page, "jrh-countdown", &countdown) &&
+        Html_Attr(countdown.start, countdown.end, "data-target", target, sizeof(target)) &&
+        ParseIsoTime(target, &t)) {
+        Earliest(&next, t, fetched);
+    }
+
+    Html_Span rest = page, label;
+    while (Html_FindClass(rest, "jrh-pick-card__label--next", &label)) {
+        char text[128];
+        Html_Text(label, text, sizeof(text));
+        if (ParseDayInText(text, &t)) Earliest(&next, t, fetched);
+        rest.start = label.end;
+    }
+
+    /* The monthly picks change on the 1st, whether or not anything says so. */
+    struct tm now;
+    gmtime_r(&fetched, &now);
+    struct tm first = { .tm_year = now.tm_year, .tm_mon = now.tm_mon + 1, .tm_mday = 1 };
+    Earliest(&next, timegm(&first), fetched);
+    return next;
+}
+
+bool Club_CacheIsFresh(time_t now, time_t fetched, time_t next_change) {
+    if (fetched <= 0 || now < fetched) return false;
+    if (now - fetched >= CLUB_MAX_CACHE_AGE_SECONDS) return false;
+    return next_change == 0 || now < next_change;
+}
+
+/* ── Cache ───────────────────────────────────────────────────────────────── */
+
+/* club.html is the last page that parsed; club.meta, beside it, says when
+   the site last confirmed it and its ETag:
+     fetched <unix time>
+     etag <value> */
+static bool CachePaths(char *html, size_t html_size, char *meta, size_t meta_size) {
+    char dir[400];
+    if (!Paths_UserData(dir, sizeof(dir), NULL) || !Paths_MakeDirs(dir)) return false;
+    int a = snprintf(html, html_size, "%s/club.html", dir);
+    int b = snprintf(meta, meta_size, "%s/club.meta", dir);
+    return a > 0 && (size_t)a < html_size && b > 0 && (size_t)b < meta_size;
+}
+
+static void ReadMeta(const char *path, time_t *fetched, char *etag, size_t etag_size) {
+    *fetched = 0;
+    if (etag_size) etag[0] = '\0';
+    size_t len = 0;
+    char *text = Io_ReadFile(path, &len);
+    if (!text) return;
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        if (strncmp(line, "fetched ", 8) == 0) *fetched = (time_t)atoll(line + 8);
+        else if (strncmp(line, "etag ", 5) == 0) snprintf(etag, etag_size, "%s", line + 5);
+    }
+    free(text);
+}
+
+static void WriteMeta(const char *path, time_t fetched, const char *etag) {
+    char text[512];
+    int n = snprintf(text, sizeof(text), "fetched %lld\netag %s\n", (long long)fetched, etag ? etag : "");
+    if (n > 0 && (size_t)n < sizeof(text)) Io_WriteFileAtomic(path, text, (size_t)n);
+}
+
+/* Parses the saved page into data. */
+static Club_Result ParseSaved(const char *path, Club_Data *data, char **html_out, size_t *len_out) {
+    size_t len = 0;
+    char *html = Io_ReadFile(path, &len);
+    if (!html) return CLUB_ERROR_NETWORK;
+    Club_Result result = Club_Parse(html, len, data);
+    if (html_out && result == CLUB_OK) {
+        *html_out = html;
+        *len_out = len;
+    } else {
+        free(html);
+    }
+    return result;
+}
+
+Club_Result Club_Load(Club_Data *data, Club_LoadMode mode) {
+    char html_path[512], meta_path[512];
+    bool have_cache = CachePaths(html_path, sizeof(html_path), meta_path, sizeof(meta_path));
+    time_t now = time(NULL), fetched = 0;
+    char etag[256] = "";
+    if (have_cache) ReadMeta(meta_path, &fetched, etag, sizeof(etag));
+
+    /* Still fresh: no network at all. */
+    if (have_cache && mode == CLUB_LOAD_AUTO && fetched > 0) {
+        char *html = NULL;
         size_t len = 0;
-        char *cached = Io_ReadFile(cache_path, &len);
-        Club_Result result = cached ? Club_Parse(cached, len, data) : CLUB_ERROR_NETWORK;
-        free(cached);
-        if (result == CLUB_OK) {
-            data->from_cache = false; /* recent, not a fallback */
-            data->age_seconds = age;
-            return CLUB_OK;
+        if (ParseSaved(html_path, data, &html, &len) == CLUB_OK) {
+            bool fresh = Club_CacheIsFresh(now, fetched, Club_NextChange(html, len, fetched));
+            free(html);
+            if (fresh) {
+                data->from_cache = false; /* current, not a fallback */
+                data->age_seconds = (long)(now - fetched);
+                return CLUB_OK;
+            }
         }
     }
 
+    /* Ask the site, offering the saved page's ETag only when that page is
+       there to fall back on. */
+    bool saved_ok = have_cache && Io_FileAge(html_path) >= 0;
     Io_Buffer page = { 0 };
-    if (Io_HttpGet(CLUB_PAGE_URL, &page)) {
+    char new_etag[256] = "";
+    bool not_modified = false;
+    if (Io_HttpGetIfChanged(CLUB_PAGE_URL, saved_ok ? etag : NULL, &page,
+                            new_etag, sizeof(new_etag), &not_modified)) {
+        if (not_modified) {
+            free(page.data);
+            Club_Result result = ParseSaved(html_path, data, NULL, NULL);
+            if (result == CLUB_OK) {
+                WriteMeta(meta_path, now, new_etag[0] ? new_etag : etag);
+                data->from_cache = false;
+                data->age_seconds = 0;
+                return CLUB_OK;
+            }
+            /* The saved copy no longer parses; fetch it whole. */
+            memset(&page, 0, sizeof(page));
+            if (!Io_HttpGetIfChanged(CLUB_PAGE_URL, NULL, &page, new_etag, sizeof(new_etag), &not_modified)) {
+                free(page.data);
+                return CLUB_ERROR_NETWORK;
+            }
+        }
         Club_Result result = Club_Parse(page.data, page.size, data);
         /* Only a page that parsed is worth keeping for offline use. */
-        if (result == CLUB_OK && have_cache_path) {
-            Io_WriteFileAtomic(cache_path, page.data, page.size);
+        if (result == CLUB_OK && have_cache &&
+            Io_WriteFileAtomic(html_path, page.data, page.size)) {
+            WriteMeta(meta_path, now, new_etag);
         }
         free(page.data);
         data->from_cache = false;
@@ -151,18 +300,10 @@ Club_Result Club_Load(Club_Data *data, long reuse_seconds) {
     }
     free(page.data);
 
-    if (!have_cache_path) return CLUB_ERROR_NETWORK;
-
-    size_t len = 0;
-    char *cached = Io_ReadFile(cache_path, &len);
-    if (!cached) return CLUB_ERROR_NETWORK;
-
-    Club_Result result = Club_Parse(cached, len, data);
-    free(cached);
-    if (result != CLUB_OK) return CLUB_ERROR_NETWORK;
-
+    /* Offline: the saved page, marked as a fallback. */
+    if (!have_cache || ParseSaved(html_path, data, NULL, NULL) != CLUB_OK) return CLUB_ERROR_NETWORK;
     data->from_cache = true;
-    data->age_seconds = Io_FileAge(cache_path);
+    data->age_seconds = fetched > 0 && now >= fetched ? (long)(now - fetched) : Io_FileAge(html_path);
     return CLUB_OK;
 }
 

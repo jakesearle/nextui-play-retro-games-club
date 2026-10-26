@@ -2,6 +2,7 @@
    and the search's results. Every search runs against a fixture SD card
    with fixture RA hash lists, so nothing here touches the network. */
 
+#include <sys/time.h>
 #include <zlib.h>
 
 #include "rc_consoles.h"
@@ -420,6 +421,88 @@ static void hashes_are_cached(void) {
     CHECK(cache && strstr(cache, hash) && strstr(cache, "Game.sfc"));
 }
 
+/* ── Saved links ─────────────────────────────────────────────────────────── */
+
+static void a_saved_link_skips_the_search(void) {
+    Fixture();
+    Rom(SFC_DIR "Super Ghouls 'N Ghosts (USA).sfc", 1, 8192, SNES, NULL);
+    Touch("sd/.system/h700/paks/Emus/SFC.pak/launch.sh");
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "Super Ghouls 'N Ghosts (USA).sfc")));
+
+    /* No hash list and no network: a search could not work, the link does. */
+    setenv("https_proxy", "http://127.0.0.1:9", 1);
+    setenv("HTTPS_PROXY", "http://127.0.0.1:9", 1);
+    Roms_Match match;
+    CHECK(Roms_FindLinked(GAME, &match));
+    CHECK_STR(match.rom_path, At(SFC_DIR "Super Ghouls 'N Ghosts (USA).sfc"));
+    CHECK_STR(match.emu_launch, At("sd/.system/h700/paks/Emus/SFC.pak/launch.sh"));
+    unsetenv("https_proxy");
+    unsetenv("HTTPS_PROXY");
+
+    CHECK(!Roms_FindLinked(GAME + 1, &match)); /* other games have no link */
+}
+
+static void a_link_to_a_changed_file_is_dropped(void) {
+    Fixture();
+    Rom(SFC_DIR "Game.sfc", 1, 8192, SNES, NULL);
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "Game.sfc")));
+    Roms_Match match;
+    CHECK(Roms_FindLinked(GAME, &match));
+
+    Rom(SFC_DIR "Game.sfc", 2, 4096, SNES, NULL); /* replaced by another file */
+    CHECK(!Roms_FindLinked(GAME, &match));
+
+    /* Same size, but touched since: not trusted either. */
+    Rom(SFC_DIR "Other.sfc", 3, 8192, SNES, NULL);
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "Other.sfc")));
+    struct timeval times[2] = { { 1000000000, 0 }, { 1000000000, 0 } };
+    utimes(At(SFC_DIR "Other.sfc"), times);
+    CHECK(!Roms_FindLinked(GAME, &match));
+}
+
+static void a_link_to_a_moved_or_deleted_file_is_dropped(void) {
+    Fixture();
+    Rom(SFC_DIR "Game.sfc", 1, 8192, SNES, NULL);
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "Game.sfc")));
+    rename(At(SFC_DIR "Game.sfc"), At(SFC_DIR "Moved.sfc"));
+    Roms_Match match;
+    CHECK(!Roms_FindLinked(GAME, &match));
+    remove(At(SFC_DIR "Moved.sfc"));
+    CHECK(!Roms_FindLinked(GAME, &match));
+}
+
+static void saving_replaces_only_that_games_link(void) {
+    Fixture();
+    Rom(SFC_DIR "A.sfc", 1, 4096, SNES, NULL);
+    Rom(SFC_DIR "B.sfc", 2, 4096, SNES, NULL);
+    Rom(SFC_DIR "C.sfc", 3, 4096, SNES, NULL);
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "A.sfc")));
+    CHECK(Roms_SaveLink(12, At(SFC_DIR "C.sfc")));
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "B.sfc"))); /* the player picked another copy */
+    Roms_Match match;
+    CHECK(Roms_FindLinked(GAME, &match));
+    CHECK_STR(match.rom_path, At(SFC_DIR "B.sfc"));
+    CHECK(Roms_FindLinked(12, &match));
+    CHECK_STR(match.rom_path, At(SFC_DIR "C.sfc"));
+}
+
+static void unlinking_forgets_every_game(void) {
+    Fixture();
+    CHECK_INT(Roms_ClearLinks(), 0); /* nothing linked yet */
+    CHECK_INT(Roms_LinkCount(), 0);
+    Rom(SFC_DIR "A.sfc", 1, 4096, SNES, NULL);
+    Rom(SFC_DIR "B.sfc", 2, 4096, SNES, NULL);
+    CHECK(Roms_SaveLink(GAME, At(SFC_DIR "A.sfc")));
+    CHECK(Roms_SaveLink(12, At(SFC_DIR "B.sfc")));
+    CHECK_INT(Roms_LinkCount(), 2);
+    CHECK_INT(Roms_ClearLinks(), 2);
+    CHECK_INT(Roms_LinkCount(), 0);
+    Roms_Match match;
+    CHECK(!Roms_FindLinked(GAME, &match));
+    CHECK(!Roms_FindLinked(12, &match));
+    CHECK_INT(Roms_ClearLinks(), 0);
+}
+
 int main(void) {
     RUN(console_from_club_labels);
     RUN(console_from_aliases_and_ra_names);
@@ -445,5 +528,10 @@ int main(void) {
     RUN(cd_games_in_the_cartridge_folder);
     RUN(arcade_found_by_name);
     RUN(hashes_are_cached);
+    RUN(a_saved_link_skips_the_search);
+    RUN(a_link_to_a_changed_file_is_dropped);
+    RUN(a_link_to_a_moved_or_deleted_file_is_dropped);
+    RUN(saving_replaces_only_that_games_link);
+    RUN(unlinking_forgets_every_game);
     CHECK_DONE();
 }
