@@ -51,6 +51,18 @@ The steps go as follows (we'll use Galaga (NES) as an example):
   - If none of them has been played, the Pak will ask which one you'd like to play
 - Once a game has launched, the Pak remembers which file it used and goes straight to it next time, with no search (even offline). If that file is moved, deleted or changed, it searches again. If you add another copy you'd rather play, **Settings → Unlink ROM files** makes it search again too (it asks first).
 
+## Roadmap
+
+Ideas for future versions, in no particular order. No dates, and plans can change.
+Each links to an issue: comment there if you want it, or can help test.
+
+- [Tested on more devices](https://github.com/jakesearle/nextui-play-retro-games-club/issues/1): TrimUI Smart Pro, Brick, Smart Pro S and Miyoo Flip
+- [Tested with Pak Store emulators](https://github.com/jakesearle/nextui-play-retro-games-club/issues/6): Nintendo 64, Dreamcast and PSP
+- [Past games](https://github.com/jakesearle/nextui-play-retro-games-club/issues/2): browse and play the club's earlier picks
+- [Your RetroAchievements progress](https://github.com/jakesearle/nextui-play-retro-games-club/issues/3): achievements unlocked, what's left to beat the game, and your award, on each game's page
+- [CHD disc images](https://github.com/jakesearle/nextui-play-retro-games-club/issues/4): match games stored as `.chd`
+- [Multi-disc games](https://github.com/jakesearle/nextui-play-retro-games-club/issues/5): Resume for games split across discs (`.m3u`)
+
 ## Coding Stuff
 
 For how the Pak works under the hood (the screens, how a ROM is matched and
