@@ -21,7 +21,11 @@ Not affiliated with Joey’s Retro Handhelds, the Play Retro Games Club or Retro
 
 ## What you need
 
-- Wi-Fi, to load the club's current games
+- Wi-Fi, to load the club's current games. After the first load, the Pak
+  keeps a copy, so you can still browse and play offline: it shows the games
+  from the last time you were online, marked with how old they are. Playing a
+  game also needs Wi-Fi once per console, the first time, to download
+  RetroAchievements' list of known ROMs.
 - Your own ROMs, of a version RetroAchievements recognizes (any file name
   works; it's the file's contents that count)
 - An emulator for the game's console. NextUI plays most retro consoles out of
