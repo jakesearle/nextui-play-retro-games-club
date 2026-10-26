@@ -75,7 +75,10 @@ LAUNCH_FILE=/tmp/prgc-tracker-launch
 rm -f "$LAUNCH_FILE"
 
 while :; do
-    set_governor powersave
+    # auto, not powersave: browsing is light, but the first search for a
+    # game hashes every ROM in its console's folders, and powersave would
+    # cap that at about half speed. auto stays low otherwise.
+    set_governor auto
     "./$APP_BIN" "$@" || echo "$APP_BIN exited with $?" >&2
 
     [ -f "$LAUNCH_FILE" ] || break

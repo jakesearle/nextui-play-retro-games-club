@@ -134,10 +134,10 @@ run
 grep -q "^emu \[$T/Super Ghouls 'N Ghosts (USA).zip\] slot=0$" "$T/log" || fail "$(cat "$T/log")"
 cleanup
 
-setup "the CPU is at full speed for the game and saves power in the app"
+setup "the CPU is at full speed for the game and scales with load in the app"
 play_on_run 1 "$T/game.sfc" 1
 run
-[ "$(tr '\n' ' ' <"$T/governor")" = "powersave performance powersave " ] || fail "governor: $(tr '\n' ' ' <"$T/governor")"
+[ "$(tr '\n' ' ' <"$T/governor")" = "auto performance auto " ] || fail "governor: $(tr '\n' ' ' <"$T/governor")"
 cleanup
 
 setup "no hook runner (older NextUI) still plays"
