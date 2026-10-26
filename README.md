@@ -1,17 +1,33 @@
 # Play Retro Games Club Tracker
 
-Find and launch the game of the month, right from your handheld!
+Find and launch the club's current games, right from your handheld!
 
-![](./img/main-menu.png)
-![](./img/game-view.png)
+<p>
+  <img src="./img/main-menu.png" width="49%" alt="Main menu, listing the club's current games">
+  <img src="./img/game-view.png" width="49%" alt="A game's page, with its box art, dates and club stats">
+</p>
 
-This NextUI Pak that shows what the
+This NextUI Pak shows what the
 [Play Retro Games Club](https://www.joeysretrohandhelds.com/play-retro-games-club/)
 is playing right now: Game of the Week, Game of the Month, Romhack of the
-Month, Game of the Season and any specials, with each game's stats,
-description and links.
+Month, Game of the Season and any specials, with each game's stats and
+description.
+
+Since handhelds can't open links, each game's page has QR codes to scan with
+your phone: one for the game on RetroAchievements, and one for the guide the
+club lists for it.
 
 Not affiliated with Joey’s Retro Handhelds, the Play Retro Games Club or RetroAchievements.
+
+## What you need
+
+- Wi-Fi, to load the club's current games
+- Your own ROMs, of a version RetroAchievements recognizes (any file name
+  works; it's the file's contents that count)
+- An emulator for the game's console. NextUI plays most retro consoles out of
+  the box; for Nintendo 64 and Dreamcast, the Pak tells you which emulator to
+  get from the Pak Store. Games for consoles NextUI can't play (GameCube, Wii,
+  PS2…) can still be browsed, but not launched.
 
 ## How does it find what game we're playing?
 
@@ -22,13 +38,17 @@ The steps go as follows (we'll use Galaga (NES) as an example):
 - The Pak then gets a [list of supported hashes](https://retroachievements.org/game/1701/hashes) (i.e. ROM files that will work)
 - The Pak also gets a list of hashes from your ROM folder
 - If no games match a supported hash, the Pak gives an error message
-- If exactly one game matches a supported hash, the Pak will launch the game
+- If exactly one game matches a supported hash (and the emulator is installed), the Pak will launch the game
 - If more than one game matches a supported hash (ex: you have two copies of "Galaga - Demons of Death (USA).nes", or you have both "Galaga - Demons of Death (USA).nes" and "Galaga (Europe).nes"), it does some tiebreakers
-  - If only one of these games has save states, launch that one
-  - If only one of these games is in "Recently Played", launch that one
-  - If none of these works, the Pak will ask which one you'd like to play.
+  - If some of them have save states, only those are considered
+  - Of those, the one you played most recently (in "Recently Played") is launched
+  - If none of them has been played, the Pak will ask which one you'd like to play
 
 ## Coding Stuff
+
+For how the Pak works under the hood (the screens, how a ROM is matched and
+launched, how the club page is read, and the tests), see the
+[developer details](./DEV-DETAILS.md).
 
 ### Requirements
 
@@ -83,11 +103,11 @@ This code was written with AI-assistance. For more info, see the [AI Disclosure]
 
 ## Copyright Notice
 
-This project *does not* provide game ROM files. Please use your own legally obtained ROMs
+This project *does not* provide game ROM files. Please use your own legally obtained ROMs.
 
 ## Licence
 
-MIT; see `LICENSE.txt`. Bundled components (Apostrophe, rcheevos, curl, OpenSSL
-and a CA bundle) are under their own terms in `THIRD-PARTY-NOTICES.txt`. Game data
+MIT; see `LICENSE.txt`. Bundled components (Apostrophe, rcheevos, qrcodegen,
+curl, OpenSSL and a CA bundle) are under their own terms in `THIRD-PARTY-NOTICES.txt`. Game data
 and box art are fetched at runtime from joeysretrohandhelds.com and
 retroachievements.org and are not distributed with the Pak.

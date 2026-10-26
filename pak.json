@@ -6,7 +6,10 @@
   "author": "jakesearle",
   "repo_url": "https://github.com/jakesearle/nextui-play-retro-games-club",
   "release_filename": "PRGC.Tracker.pak.zip",
-  "screenshots": [],
+  "screenshots": [
+    "img/main-menu.png",
+    "img/game-view.png"
+  ],
   "platforms": [
     "tg5040",
     "tg5050",

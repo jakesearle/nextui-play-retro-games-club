@@ -9,3 +9,6 @@ subprojects/*
 .vscode/
 .task/
 dist/
+
+# macOS Finder metadata
+.DS_Store

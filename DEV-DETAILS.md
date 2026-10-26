@@ -1,10 +1,14 @@
+# Developer Details
+
+How the Play Retro Games Club Tracker works, for anyone changing it. For what
+it does and how to build it, see the [README](./README.md).
 
 ## Screens
 
 | Screen | Contents |
 |---|---|
 | Current picks | One row per current game, with its event underneath, and Refresh at the bottom |
-| Game details | Box art, event dates, rating, beaten/mastered/completed counts, time to beat, description, links |
+| Game details | Box art, event dates, rating, beaten and 100% counts, time to beat, links as QR codes, description |
 
 | Screen | B | X | A |
 |---|---|---|---|
